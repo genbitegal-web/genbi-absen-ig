@@ -1,0 +1,51 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  npm           String         @unique
+  campus        String
+  name          String
+  password      String
+  role          String         @default("STUDENT") // ADMIN or STUDENT
+  submissions   Submission[]
+  notifications Notification[]
+  createdAt     DateTime       @default(now())
+}
+
+model Task {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  igPostUrl   String
+  createdAt   DateTime     @default(now())
+  submissions Submission[]
+}
+
+model Submission {
+  id        Int      @id @default(autoincrement())
+  taskId    Int
+  studentId Int
+  proofUrl  String
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt DateTime @default(now())
+  task      Task     @relation(fields: [taskId], references: [id])
+  student   User     @relation(fields: [studentId], references: [id])
+
+  @@unique([taskId, studentId])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
