@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { StudentTask, Notification } from '../../types';
-import { Bell, Upload, CheckCircle, ExternalLink, Clock } from 'lucide-react';
+import { Bell, Upload, CheckCircle, ExternalLink, Clock, Loader2 } from 'lucide-react';
 
 export function StudentDashboard() {
   const { token } = useAuth();
@@ -102,7 +102,11 @@ export function StudentDashboard() {
                 
                 {!task.hasUploaded && (
                   <label className="flex-1 flex justify-center items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-50">
-                    <Upload className="w-4 h-4 mr-2" />
+                    {uploadingId === task.id ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4 mr-2" />
+                    )}
                     {uploadingId === task.id ? 'Mengunggah...' : 'Unggah Bukti'}
                     <input 
                       type="file" 

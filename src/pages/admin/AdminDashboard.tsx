@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Task, User, ReportItem } from '../../types';
-import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2 } from 'lucide-react';
+import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export function AdminDashboard() {
@@ -40,6 +40,8 @@ function TasksTab({ token }: { token: string }) {
   const [reportTask, setReportTask] = useState<number | null>(null);
   const [confirmDeleteTask, setConfirmDeleteTask] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchTasks();
@@ -53,22 +55,31 @@ function TasksTab({ token }: { token: string }) {
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsCreating(true);
     const formData = new FormData(e.currentTarget);
     const payload = {
       title: formData.get('title'),
       description: formData.get('description'),
       igPostUrl: formData.get('igPostUrl'),
     };
-    await fetch('/api/admin/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(payload),
-    });
-    setShowCreate(false);
-    fetchTasks();
+    try {
+      await fetch('/api/admin/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      setShowCreate(false);
+      fetchTasks();
+    } catch (err) {
+      setErrorMsg('Gagal membuat tugas');
+      setTimeout(() => setErrorMsg(''), 3000);
+    } finally {
+      setIsCreating(false);
+    }
   };
 
   const handleDeleteTask = async (taskId: number) => {
+    setDeletingTaskId(taskId);
     try {
       const res = await fetch(`/api/admin/tasks/${taskId}`, {
         method: 'DELETE',
@@ -80,6 +91,8 @@ function TasksTab({ token }: { token: string }) {
     } catch (err) {
       setErrorMsg('Gagal menghapus tugas');
       setTimeout(() => setErrorMsg(''), 3000);
+    } finally {
+      setDeletingTaskId(null);
     }
   };
 
@@ -121,7 +134,10 @@ function TasksTab({ token }: { token: string }) {
             </div>
             <div className="flex justify-end space-x-3">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium">Batal</button>
-              <button type="submit" className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium">Simpan & Umumkan</button>
+              <button type="submit" disabled={isCreating} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium disabled:opacity-50">
+                {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {isCreating ? 'Menyimpan...' : 'Simpan & Umumkan'}
+              </button>
             </div>
           </form>
         </div>
@@ -140,8 +156,11 @@ function TasksTab({ token }: { token: string }) {
               <div className="flex flex-col space-y-2">
                 <p className="text-xs text-red-400 font-medium text-center">Yakin ingin menghapus?</p>
                 <div className="flex space-x-2">
-                  <button onClick={() => handleDeleteTask(task.id)} className="flex-1 py-2 bg-red-600/90 text-white hover:bg-red-500 rounded-lg font-medium text-sm transition-colors">Hapus</button>
-                  <button onClick={() => setConfirmDeleteTask(null)} className="flex-1 py-2 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 border border-zinc-700 rounded-lg font-medium text-sm transition-colors">Batal</button>
+                  <button onClick={() => handleDeleteTask(task.id)} disabled={deletingTaskId === task.id} className="flex-1 flex justify-center items-center py-2 bg-red-600/90 text-white hover:bg-red-500 rounded-lg font-medium text-sm transition-colors disabled:opacity-50">
+                    {deletingTaskId === task.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                    Hapus
+                  </button>
+                  <button onClick={() => setConfirmDeleteTask(null)} disabled={deletingTaskId === task.id} className="flex-1 py-2 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 border border-zinc-700 rounded-lg font-medium text-sm transition-colors disabled:opacity-50">Batal</button>
                 </div>
               </div>
             ) : (
@@ -343,6 +362,8 @@ function StudentsTab({ token }: { token: string }) {
   
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState<number | null>(null);
   const [msg, setMsg] = useState({ text: '', type: '' });
+  const [isAdding, setIsAdding] = useState(false);
+  const [deletingStudentId, setDeletingStudentId] = useState<number | null>(null);
 
   const showMsg = (text: string, type: 'error'|'success') => {
     setMsg({ text, type });
@@ -420,6 +441,7 @@ function StudentsTab({ token }: { token: string }) {
 
   const handleManualAdd = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsAdding(true);
     const formData = new FormData(e.currentTarget);
     const payload = {
       npm: formData.get('npm'),
@@ -440,10 +462,13 @@ function StudentsTab({ token }: { token: string }) {
       fetchStudents();
     } catch (err: any) {
       showMsg(err.message || 'Gagal menambahkan mahasiswa', 'error');
+    } finally {
+      setIsAdding(false);
     }
   };
 
   const handleDeleteStudent = async (studentId: number) => {
+    setDeletingStudentId(studentId);
     try {
       const res = await fetch(`/api/admin/students/${studentId}`, {
         method: 'DELETE',
@@ -455,6 +480,8 @@ function StudentsTab({ token }: { token: string }) {
       fetchStudents();
     } catch (err) {
       showMsg('Gagal menghapus mahasiswa', 'error');
+    } finally {
+      setDeletingStudentId(null);
     }
   };
 
@@ -482,7 +509,7 @@ function StudentsTab({ token }: { token: string }) {
             disabled={importing}
             className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium disabled:opacity-50 transition-colors"
           >
-            <UploadCloud className="w-4 h-4 mr-2" />
+            {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UploadCloud className="w-4 h-4 mr-2" />}
             {importing ? 'Mengimport...' : 'Import Excel'}
           </button>
         </div>
@@ -514,7 +541,10 @@ function StudentsTab({ token }: { token: string }) {
             </div>
             <div className="flex justify-end space-x-3 pt-2">
               <button type="button" onClick={() => setShowAddForm(false)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium transition-colors">Batal</button>
-              <button type="submit" className="px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors">Simpan Mahasiswa</button>
+              <button type="submit" disabled={isAdding} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                {isAdding && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {isAdding ? 'Menyimpan...' : 'Simpan Mahasiswa'}
+              </button>
             </div>
           </form>
         </div>
@@ -556,8 +586,11 @@ function StudentsTab({ token }: { token: string }) {
                   <td className="px-6 py-4">
                     {confirmDeleteStudent === student.id ? (
                       <div className="flex items-center space-x-2">
-                        <button onClick={() => handleDeleteStudent(student.id)} className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded transition-colors">Hapus</button>
-                        <button onClick={() => setConfirmDeleteStudent(null)} className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-medium rounded transition-colors">Batal</button>
+                        <button onClick={() => handleDeleteStudent(student.id)} disabled={deletingStudentId === student.id} className="inline-flex items-center px-2 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded transition-colors disabled:opacity-50">
+                          {deletingStudentId === student.id ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : null}
+                          Hapus
+                        </button>
+                        <button onClick={() => setConfirmDeleteStudent(null)} disabled={deletingStudentId === student.id} className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-medium rounded transition-colors disabled:opacity-50">Batal</button>
                       </div>
                     ) : (
                       <button
