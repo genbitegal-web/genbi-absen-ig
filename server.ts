@@ -298,7 +298,7 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
 
     if (uploadError) {
       console.error("Supabase Storage Error:", uploadError);
-      return res.status(500).json({ error: 'Gagal mengunggah ke penyimpanan cloud' });
+      return res.status(500).json({ error: `Gagal mengunggah ke penyimpanan cloud: ${uploadError.message}` });
     }
 
     const { data: publicUrlData } = supabase.storage
@@ -313,9 +313,9 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       }
     });
     res.json(submission);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Gagal mengunggah bukti' });
+  } catch (error: any) {
+    console.error("Submission Error:", error);
+    res.status(500).json({ error: `Gagal mengunggah bukti: ${error.message}` });
   }
 });
 
