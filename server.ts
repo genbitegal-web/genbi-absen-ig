@@ -334,19 +334,27 @@ app.get('/api/student/notifications', authMiddleware, async (req: any, res: any)
 
 // Create initial admin user if none exists
 async function seedAdmin() {
-  const adminExists = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
-  if (!adminExists) {
-    const hashedPassword = await bcrypt.hash('admin123', 10);
-    await prisma.user.create({
-      data: {
-        npm: 'admin',
-        name: 'Administrator',
-        campus: 'Pusat',
-        password: hashedPassword,
-        role: 'ADMIN',
-      }
-    });
-    console.log('Default admin created: npm=admin, password=admin123');
+  try {
+    if (!process.env.DATABASE_URL) {
+      console.warn('⚠️ DATABASE_URL is not set. Skipping admin seed.');
+      return;
+    }
+    const adminExists = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
+    if (!adminExists) {
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      await prisma.user.create({
+        data: {
+          npm: 'admin',
+          name: 'Administrator',
+          campus: 'Pusat',
+          password: hashedPassword,
+          role: 'ADMIN',
+        }
+      });
+      console.log('Default admin created: npm=admin, password=admin123');
+    }
+  } catch (error) {
+    console.error('⚠️ Failed to seed admin user. Database might not be connected yet.', error);
   }
 }
 
