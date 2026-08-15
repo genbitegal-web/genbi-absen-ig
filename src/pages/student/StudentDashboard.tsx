@@ -22,10 +22,12 @@ export function StudentDashboard() {
       ]);
       const tasksData = await tasksRes.json();
       const notifData = await notifRes.json();
-      setTasks(tasksData);
-      setNotifications(notifData);
+      setTasks(Array.isArray(tasksData) ? tasksData : []);
+      setNotifications(Array.isArray(notifData) ? notifData : []);
     } catch (error) {
       console.error('Error fetching data', error);
+      setTasks([]);
+      setNotifications([]);
     } finally {
       setLoading(false);
     }

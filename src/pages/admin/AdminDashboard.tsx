@@ -48,7 +48,7 @@ function TasksTab({ token }: { token: string }) {
   const fetchTasks = async () => {
     const res = await fetch('/api/admin/tasks', { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
-    setTasks(data);
+    setTasks(Array.isArray(data) ? data : []);
   };
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -176,7 +176,11 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
     fetch(`/api/admin/tasks/${taskId}/report`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
-        setReport(data.report);
+        setReport(Array.isArray(data.report) ? data.report : []);
+        setLoading(false);
+      })
+      .catch(() => {
+        setReport([]);
         setLoading(false);
       });
   }, [taskId, token]);
@@ -351,7 +355,8 @@ function StudentsTab({ token }: { token: string }) {
 
   const fetchStudents = async () => {
     const res = await fetch('/api/admin/students', { headers: { Authorization: `Bearer ${token}` } });
-    setStudents(await res.json());
+    const data = await res.json();
+    setStudents(Array.isArray(data) ? data : []);
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -10,7 +10,7 @@ import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 const SECRET_KEY = process.env.JWT_SECRET || 'supersecret';
 
 const prisma = new PrismaClient();
