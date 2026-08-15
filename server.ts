@@ -6,7 +6,6 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
@@ -56,8 +55,8 @@ app.post('/api/auth/login', async (req, res) => {
 
     const token = jwt.sign({ id: user.id, npm: user.npm, role: user.role, name: user.name, campus: user.campus }, SECRET_KEY, { expiresIn: '1d' });
     res.json({ token, user: { id: user.id, npm: user.npm, name: user.name, role: user.role, campus: user.campus } });
-  } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
@@ -363,6 +362,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
