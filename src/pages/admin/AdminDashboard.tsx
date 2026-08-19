@@ -414,10 +414,15 @@ function StudentsTab({ token }: { token: string }) {
           body: JSON.stringify({ students: parsedStudents })
         });
         const data = await res.json();
+        
+        if (!res.ok) {
+          throw new Error(data.error || 'Terjadi kesalahan pada server');
+        }
+        
         alert(data.message || 'Import sukses');
         fetchStudents();
-      } catch (err) {
-        alert('Gagal mengimport data. Pastikan file berformat Excel.');
+      } catch (err: any) {
+        alert(err.message || 'Gagal mengimport data. Pastikan file berformat Excel.');
       } finally {
         setImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';

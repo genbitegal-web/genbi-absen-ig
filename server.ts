@@ -125,28 +125,30 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
 app.post('/api/admin/import-students', authMiddleware, adminMiddleware, async (req, res) => {
   const { students } = req.body; // array of { npm, name, campus }
   try {
-    let imported = 0;
     const defaultPassword = await bcrypt.hash('12345', 10);
-    for (const student of students) {
-      if (!student.npm || !student.name || !student.campus) continue;
-      
-      const exists = await prisma.user.findUnique({ where: { npm: String(student.npm) } });
-      if (!exists) {
-        await prisma.user.create({
-          data: {
-            npm: String(student.npm),
-            name: student.name,
-            campus: student.campus,
-            password: defaultPassword,
-            role: 'STUDENT',
-          }
-        });
-        imported++;
-      }
+    
+    // Filter out invalid students
+    const validStudents = students.filter((s: any) => s.npm && s.name && s.campus).map((s: any) => ({
+      npm: String(s.npm),
+      name: s.name,
+      campus: s.campus,
+      password: defaultPassword,
+      role: 'STUDENT'
+    }));
+
+    if (validStudents.length === 0) {
+      return res.status(400).json({ error: 'Tidak ada data valid untuk diimport' });
     }
-    res.json({ message: `${imported} mahasiswa berhasil diimport.` });
-  } catch (error) {
-    res.status(500).json({ error: 'Gagal import data' });
+
+    const result = await prisma.user.createMany({
+      data: validStudents,
+      skipDuplicates: true
+    });
+
+    res.json({ message: `${result.count} mahasiswa berhasil diimport.` });
+  } catch (error: any) {
+    console.error("Import Error:", error);
+    res.status(500).json({ error: `Gagal import data: ${error.message || 'Server error'}` });
   }
 });
 
