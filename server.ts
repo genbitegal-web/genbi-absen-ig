@@ -122,6 +122,43 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
   }
 });
 
+app.post('/api/admin/students/bulk-delete', authMiddleware, adminMiddleware, async (req, res) => {
+  const { studentIds } = req.body;
+  if (!Array.isArray(studentIds) || studentIds.length === 0) {
+    return res.status(400).json({ error: 'Tidak ada mahasiswa yang dipilih' });
+  }
+
+  try {
+    const students = await prisma.user.findMany({ 
+      where: { id: { in: studentIds }, role: 'STUDENT' } 
+    });
+    
+    const validStudentIds = students.map(s => s.id);
+    
+    if (validStudentIds.length === 0) {
+      return res.status(404).json({ error: 'Mahasiswa tidak valid' });
+    }
+
+    const submissions = await prisma.submission.findMany({ where: { studentId: { in: validStudentIds } } });
+    const filesToDelete = submissions
+      .map(sub => sub.proofUrl ? sub.proofUrl.split('/').pop() : null)
+      .filter((f): f is string => f !== null);
+
+    if (filesToDelete.length > 0) {
+      await supabase.storage.from('proofs').remove(filesToDelete);
+    }
+
+    await prisma.submission.deleteMany({ where: { studentId: { in: validStudentIds } } });
+    await prisma.notification.deleteMany({ where: { userId: { in: validStudentIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: validStudentIds } } });
+    
+    res.json({ message: `${validStudentIds.length} Mahasiswa berhasil dihapus` });
+  } catch (error) {
+    console.error("Bulk Delete Error:", error);
+    res.status(500).json({ error: 'Gagal menghapus mahasiswa' });
+  }
+});
+
 app.post('/api/admin/import-students', authMiddleware, adminMiddleware, async (req, res) => {
   const { students } = req.body; // array of { npm, name, campus }
   try {

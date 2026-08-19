@@ -364,6 +364,9 @@ function StudentsTab({ token }: { token: string }) {
   const [msg, setMsg] = useState({ text: '', type: '' });
   const [isAdding, setIsAdding] = useState(false);
   const [deletingStudentId, setDeletingStudentId] = useState<number | null>(null);
+  const [selectedStudents, setSelectedStudents] = useState<number[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
 
   const showMsg = (text: string, type: 'error'|'success') => {
     setMsg({ text, type });
@@ -481,6 +484,7 @@ function StudentsTab({ token }: { token: string }) {
       });
       if (!res.ok) throw new Error('Gagal');
       setConfirmDeleteStudent(null);
+      setSelectedStudents(prev => prev.filter(id => id !== studentId));
       showMsg('Mahasiswa berhasil dihapus', 'success');
       fetchStudents();
     } catch (err) {
@@ -488,6 +492,41 @@ function StudentsTab({ token }: { token: string }) {
     } finally {
       setDeletingStudentId(null);
     }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedStudents.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await fetch('/api/admin/students/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ studentIds: selectedStudents })
+      });
+      if (!res.ok) throw new Error('Gagal');
+      setConfirmBulkDelete(false);
+      setSelectedStudents([]);
+      showMsg(`${selectedStudents.length} Mahasiswa berhasil dihapus`, 'success');
+      fetchStudents();
+    } catch (err) {
+      showMsg('Gagal menghapus mahasiswa terpilih', 'error');
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedStudents.length === students.length && students.length > 0) {
+      setSelectedStudents([]);
+    } else {
+      setSelectedStudents(students.map(s => s.id));
+    }
+  };
+
+  const toggleSelectStudent = (id: number) => {
+    setSelectedStudents(prev => 
+      prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
+    );
   };
 
   return (
@@ -572,10 +611,62 @@ function StudentsTab({ token }: { token: string }) {
       </div>
 
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        {selectedStudents.length > 0 && (
+          <div className="bg-zinc-800/50 p-4 flex items-center justify-between border-b border-zinc-800">
+            <span className="text-sm font-medium text-zinc-300">
+              {selectedStudents.length} Mahasiswa Terpilih
+            </span>
+            <div className="flex items-center space-x-3">
+              <button 
+                onClick={() => setSelectedStudents([])}
+                className="text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+                disabled={isBulkDeleting}
+              >
+                Batal
+              </button>
+              {confirmBulkDelete ? (
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-red-400">Yakin hapus terpilih?</span>
+                  <button 
+                    onClick={handleBulkDelete}
+                    disabled={isBulkDeleting}
+                    className="inline-flex items-center px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    {isBulkDeleting ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : null}
+                    Ya, Hapus
+                  </button>
+                  <button 
+                    onClick={() => setConfirmBulkDelete(false)}
+                    disabled={isBulkDeleting}
+                    className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                  >
+                    Batal
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setConfirmBulkDelete(true)}
+                  className="inline-flex items-center px-3 py-1.5 bg-red-900/40 text-red-400 border border-red-900/50 hover:bg-red-900/60 rounded text-sm font-medium transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 mr-1.5" />
+                  Hapus Terpilih
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-zinc-800/40 border-b border-zinc-800">
               <tr>
+                <th className="px-6 py-4 w-12">
+                  <input 
+                    type="checkbox"
+                    className="rounded border-zinc-700 bg-zinc-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                    checked={students.length > 0 && selectedStudents.length === students.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="px-6 py-4 font-medium text-zinc-400">NPM</th>
                 <th className="px-6 py-4 font-medium text-zinc-400">Nama</th>
                 <th className="px-6 py-4 font-medium text-zinc-400">Kampus</th>
@@ -584,7 +675,15 @@ function StudentsTab({ token }: { token: string }) {
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {students.map(student => (
-                <tr key={student.id} className="hover:bg-white/5">
+                <tr key={student.id} className={`hover:bg-white/5 transition-colors ${selectedStudents.includes(student.id) ? 'bg-blue-900/10' : ''}`}>
+                  <td className="px-6 py-4">
+                    <input 
+                      type="checkbox"
+                      className="rounded border-zinc-700 bg-zinc-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-zinc-900"
+                      checked={selectedStudents.includes(student.id)}
+                      onChange={() => toggleSelectStudent(student.id)}
+                    />
+                  </td>
                   <td className="px-6 py-4 text-zinc-100 font-medium">{student.npm}</td>
                   <td className="px-6 py-4 text-zinc-400">{student.name}</td>
                   <td className="px-6 py-4 text-zinc-400">{student.campus}</td>
@@ -611,7 +710,7 @@ function StudentsTab({ token }: { token: string }) {
               ))}
               {students.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-zinc-500">
+                  <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">
                     Belum ada data mahasiswa. Silakan import dari Excel.
                   </td>
                 </tr>
