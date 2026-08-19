@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Task, User, ReportItem } from '../../types';
-import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2 } from 'lucide-react';
+import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2, Search } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export function AdminDashboard() {
@@ -367,6 +367,7 @@ function StudentsTab({ token }: { token: string }) {
   const [selectedStudents, setSelectedStudents] = useState<number[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const showMsg = (text: string, type: 'error'|'success') => {
     setMsg({ text, type });
@@ -382,6 +383,19 @@ function StudentsTab({ token }: { token: string }) {
     const data = await res.json();
     setStudents(Array.isArray(data) ? data : []);
   };
+
+  useEffect(() => {
+    setSelectedStudents([]);
+  }, [searchQuery]);
+
+  const filteredStudents = useMemo(() => {
+    if (!searchQuery.trim()) return students;
+    const lowerQuery = searchQuery.toLowerCase();
+    return students.filter(s => 
+      s.name.toLowerCase().includes(lowerQuery) || 
+      s.npm.toLowerCase().includes(lowerQuery)
+    );
+  }, [students, searchQuery]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -516,10 +530,10 @@ function StudentsTab({ token }: { token: string }) {
   };
 
   const toggleSelectAll = () => {
-    if (selectedStudents.length === students.length && students.length > 0) {
+    if (selectedStudents.length === filteredStudents.length && filteredStudents.length > 0) {
       setSelectedStudents([]);
     } else {
-      setSelectedStudents(students.map(s => s.id));
+      setSelectedStudents(filteredStudents.map(s => s.id));
     }
   };
 
@@ -531,12 +545,22 @@ function StudentsTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-xl font-semibold text-zinc-100">Data Mahasiswa Penerima Beasiswa</h2>
-        <div className="flex gap-3">
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+            <input 
+              type="text" 
+              placeholder="Cari NPM atau Nama..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-all"
+            />
+          </div>
           <button 
             onClick={() => setShowAddForm(!showAddForm)}
-            className="inline-flex items-center px-4 py-2 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-700 text-sm font-medium transition-colors"
+            className="inline-flex justify-center items-center px-4 py-2 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-700 text-sm font-medium transition-colors whitespace-nowrap"
           >
             <Plus className="w-4 h-4 mr-2" />
             Tambah Manual
@@ -551,7 +575,7 @@ function StudentsTab({ token }: { token: string }) {
           <button 
             onClick={() => fileInputRef.current?.click()}
             disabled={importing}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium disabled:opacity-50 transition-colors"
+            className="inline-flex justify-center items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium disabled:opacity-50 transition-colors whitespace-nowrap"
           >
             {importing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UploadCloud className="w-4 h-4 mr-2" />}
             {importing ? 'Mengimport...' : 'Import Excel'}
@@ -663,7 +687,7 @@ function StudentsTab({ token }: { token: string }) {
                   <input 
                     type="checkbox"
                     className="rounded border-zinc-700 bg-zinc-800 text-blue-600 focus:ring-blue-500 focus:ring-offset-zinc-900"
-                    checked={students.length > 0 && selectedStudents.length === students.length}
+                    checked={filteredStudents.length > 0 && selectedStudents.length === filteredStudents.length}
                     onChange={toggleSelectAll}
                   />
                 </th>
@@ -674,7 +698,7 @@ function StudentsTab({ token }: { token: string }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {students.map(student => (
+              {filteredStudents.map(student => (
                 <tr key={student.id} className={`hover:bg-white/5 transition-colors ${selectedStudents.includes(student.id) ? 'bg-blue-900/10' : ''}`}>
                   <td className="px-6 py-4">
                     <input 
@@ -708,10 +732,12 @@ function StudentsTab({ token }: { token: string }) {
                   </td>
                 </tr>
               ))}
-              {students.length === 0 && (
+              {filteredStudents.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-zinc-500">
-                    Belum ada data mahasiswa. Silakan import dari Excel.
+                    {students.length === 0 
+                      ? 'Belum ada data mahasiswa. Silakan import dari Excel.'
+                      : 'Data tidak ditemukan.'}
                   </td>
                 </tr>
               )}
