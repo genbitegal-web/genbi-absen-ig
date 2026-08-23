@@ -10,7 +10,8 @@ export interface Task {
   id: number;
   title: string;
   description: string;
-  igPostUrl: string;
+  igPostUrl?: string;
+  igPostUrls: string[];
   createdAt: string;
   _count?: {
     submissions: number;

@@ -1,11 +1,11 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
-}
-
 generator client {
   provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
@@ -14,17 +14,18 @@ model User {
   campus        String
   name          String
   password      String
-  role          String         @default("STUDENT") // ADMIN or STUDENT
-  submissions   Submission[]
-  notifications Notification[]
+  role          String         @default("STUDENT")
   createdAt     DateTime       @default(now())
+  notifications Notification[]
+  submissions   Submission[]
 }
 
 model Task {
   id          Int          @id @default(autoincrement())
   title       String
   description String
-  igPostUrl   String
+  igPostUrl   String?
+  igPostUrls  String[]     @default([])
   createdAt   DateTime     @default(now())
   submissions Submission[]
 }
@@ -34,10 +35,10 @@ model Submission {
   taskId    Int
   studentId Int
   proofUrl  String
-  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  status    String   @default("PENDING")
   createdAt DateTime @default(now())
-  task      Task     @relation(fields: [taskId], references: [id])
   student   User     @relation(fields: [studentId], references: [id])
+  task      Task     @relation(fields: [taskId], references: [id])
 
   @@unique([taskId, studentId])
 }

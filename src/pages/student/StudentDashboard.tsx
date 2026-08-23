@@ -90,34 +90,41 @@ export function StudentDashboard() {
               </div>
               
               <div className="flex flex-col sm:flex-row gap-4 mt-6">
-                <a 
-                  href={task.igPostUrl} 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="flex-1 flex justify-center items-center px-4 py-2 bg-zinc-800/50 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4 mr-2" />
-                  Buka Postingan IG
-                </a>
+                <div className="flex-1 flex flex-col gap-2">
+                  {(task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls : [task.igPostUrl]).map((url, i) => url && (
+                    <a 
+                      key={i}
+                      href={url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex justify-center items-center px-4 py-2 bg-zinc-800/50 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-2" />
+                      Buka Postingan IG {task.igPostUrls?.length > 1 ? `#${i + 1}` : ''}
+                    </a>
+                  ))}
+                </div>
                 
                 {!task.hasUploaded && (
-                  <label className="flex-1 flex justify-center items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-50">
-                    {uploadingId === task.id ? (
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    ) : (
-                      <Upload className="w-4 h-4 mr-2" />
-                    )}
-                    {uploadingId === task.id ? 'Mengunggah...' : 'Unggah Bukti'}
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      className="hidden" 
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) handleUpload(task.id, e.target.files[0]);
-                      }}
-                      disabled={uploadingId === task.id}
-                    />
-                  </label>
+                  <div className="flex-1">
+                    <label className="w-full flex justify-center items-center px-4 py-2 h-full min-h-[42px] bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-50">
+                      {uploadingId === task.id ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="w-4 h-4 mr-2" />
+                      )}
+                      {uploadingId === task.id ? 'Mengunggah...' : 'Unggah Bukti'}
+                      <input 
+                        type="file" 
+                        accept="image/*" 
+                        className="hidden" 
+                        onChange={(e) => {
+                          if (e.target.files?.[0]) handleUpload(task.id, e.target.files[0]);
+                        }}
+                        disabled={uploadingId === task.id}
+                      />
+                    </label>
+                  </div>
                 )}
               </div>
             </div>

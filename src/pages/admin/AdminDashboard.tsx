@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Task, User, ReportItem } from '../../types';
-import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2, Search } from 'lucide-react';
+import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2, Search, Edit } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export function AdminDashboard() {
@@ -42,6 +42,9 @@ function TasksTab({ token }: { token: string }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
+  
+  // New state for dynamic URLs
+  const [taskUrls, setTaskUrls] = useState<string[]>(['']);
 
   useEffect(() => {
     fetchTasks();
@@ -57,10 +60,11 @@ function TasksTab({ token }: { token: string }) {
     e.preventDefault();
     setIsCreating(true);
     const formData = new FormData(e.currentTarget);
+    const validUrls = taskUrls.filter(url => url.trim() !== '');
     const payload = {
       title: formData.get('title'),
       description: formData.get('description'),
-      igPostUrl: formData.get('igPostUrl'),
+      igPostUrls: validUrls,
     };
     try {
       await fetch('/api/admin/tasks', {
@@ -69,12 +73,31 @@ function TasksTab({ token }: { token: string }) {
         body: JSON.stringify(payload),
       });
       setShowCreate(false);
+      setTaskUrls(['']);
       fetchTasks();
     } catch (err) {
       setErrorMsg('Gagal membuat tugas');
       setTimeout(() => setErrorMsg(''), 3000);
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleUrlChange = (index: number, value: string) => {
+    const newUrls = [...taskUrls];
+    newUrls[index] = value;
+    setTaskUrls(newUrls);
+  };
+
+  const addUrlField = () => {
+    setTaskUrls([...taskUrls, '']);
+  };
+
+  const removeUrlField = (index: number) => {
+    if (taskUrls.length > 1) {
+      const newUrls = [...taskUrls];
+      newUrls.splice(index, 1);
+      setTaskUrls(newUrls);
     }
   };
 
@@ -129,8 +152,38 @@ function TasksTab({ token }: { token: string }) {
               <textarea name="description" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" rows={3} placeholder="Instruksi detail..."></textarea>
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">URL Postingan Instagram</label>
-              <input name="igPostUrl" type="url" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="https://instagram.com/..." />
+              <label className="block text-sm font-medium text-zinc-300 mb-1">URL / Link Tugas (Bisa Lebih Dari Satu)</label>
+              <div className="space-y-2">
+                {taskUrls.map((url, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input 
+                      type="url" 
+                      value={url}
+                      onChange={(e) => handleUrlChange(index, e.target.value)}
+                      required={index === 0}
+                      className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                      placeholder="https://instagram.com/..." 
+                    />
+                    {taskUrls.length > 1 && (
+                      <button 
+                        type="button" 
+                        onClick={() => removeUrlField(index)}
+                        className="px-3 py-2 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg transition-colors border border-red-900/50"
+                      >
+                        <XCircle className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button 
+                  type="button" 
+                  onClick={addUrlField}
+                  className="inline-flex items-center text-sm text-blue-400 hover:text-blue-300 mt-2"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Tambah URL Lainnya
+                </button>
+              </div>
             </div>
             <div className="flex justify-end space-x-3">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium">Batal</button>
@@ -363,11 +416,15 @@ function StudentsTab({ token }: { token: string }) {
   const [confirmDeleteStudent, setConfirmDeleteStudent] = useState<number | null>(null);
   const [msg, setMsg] = useState({ text: '', type: '' });
   const [isAdding, setIsAdding] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<User | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const [deletingStudentId, setDeletingStudentId] = useState<number | null>(null);
   const [selectedStudents, setSelectedStudents] = useState<number[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterCampus, setFilterCampus] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest'); // 'newest', 'az', 'za'
 
   const showMsg = (text: string, type: 'error'|'success') => {
     setMsg({ text, type });
@@ -386,16 +443,39 @@ function StudentsTab({ token }: { token: string }) {
 
   useEffect(() => {
     setSelectedStudents([]);
-  }, [searchQuery]);
+  }, [searchQuery, filterCampus, sortOrder]);
+
+  const uniqueCampuses = useMemo(() => {
+    const campuses = students.map(s => s.campus).filter(Boolean);
+    return Array.from(new Set(campuses)).sort();
+  }, [students]);
 
   const filteredStudents = useMemo(() => {
-    if (!searchQuery.trim()) return students;
-    const lowerQuery = searchQuery.toLowerCase();
-    return students.filter(s => 
-      s.name.toLowerCase().includes(lowerQuery) || 
-      s.npm.toLowerCase().includes(lowerQuery)
-    );
-  }, [students, searchQuery]);
+    let result = [...students];
+
+    if (searchQuery.trim()) {
+      const lowerQuery = searchQuery.toLowerCase();
+      result = result.filter(s => 
+        s.name.toLowerCase().includes(lowerQuery) || 
+        s.npm.toLowerCase().includes(lowerQuery)
+      );
+    }
+
+    if (filterCampus) {
+      result = result.filter(s => s.campus === filterCampus);
+    }
+
+    if (sortOrder === 'az') {
+      result.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortOrder === 'za') {
+      result.sort((a, b) => b.name.localeCompare(a.name));
+    } else {
+      // newest (assuming newest has higher ID or relies on original order which is from DB)
+      result.sort((a, b) => b.id - a.id);
+    }
+
+    return result;
+  }, [students, searchQuery, filterCampus, sortOrder]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -421,7 +501,8 @@ function StudentsTab({ token }: { token: string }) {
         }).filter(Boolean);
 
         if (parsedStudents.length === 0) {
-          alert('Format Excel tidak valid. Pastikan kolom berurutan: NPM, Nama, Kampus');
+          showMsg('Format Excel tidak valid. Pastikan kolom berurutan: NPM, Nama, Kampus', 'error');
+          setImporting(false);
           return;
         }
 
@@ -436,10 +517,10 @@ function StudentsTab({ token }: { token: string }) {
           throw new Error(data.error || 'Terjadi kesalahan pada server');
         }
         
-        alert(data.message || 'Import sukses');
+        showMsg(data.message || 'Import sukses', 'success');
         fetchStudents();
       } catch (err: any) {
-        alert(err.message || 'Gagal mengimport data. Pastikan file berformat Excel.');
+        showMsg(err.message || 'Gagal mengimport data. Pastikan file berformat Excel.', 'error');
       } finally {
         setImporting(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -486,6 +567,36 @@ function StudentsTab({ token }: { token: string }) {
       showMsg(err.message || 'Gagal menambahkan mahasiswa', 'error');
     } finally {
       setIsAdding(false);
+    }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+    setIsEditing(true);
+    const formData = new FormData(e.currentTarget);
+    const payload = {
+      npm: formData.get('npm'),
+      name: formData.get('name'),
+      campus: formData.get('campus'),
+      password: formData.get('password') || undefined,
+    };
+    
+    try {
+      const res = await fetch(`/api/admin/students/${editingStudent.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setEditingStudent(null);
+      showMsg('Berhasil memperbarui data mahasiswa', 'success');
+      fetchStudents();
+    } catch (err: any) {
+      showMsg(err.message || 'Gagal memperbarui mahasiswa', 'error');
+    } finally {
+      setIsEditing(false);
     }
   };
 
@@ -545,10 +656,10 @@ function StudentsTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-xl font-semibold text-zinc-100">Data Mahasiswa Penerima Beasiswa</h2>
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-64">
+        <div className="flex flex-col sm:flex-row flex-wrap justify-end gap-3 w-full md:w-auto">
+          <div className="relative flex-1 sm:flex-none sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <input 
               type="text" 
@@ -558,6 +669,25 @@ function StudentsTab({ token }: { token: string }) {
               className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm transition-all"
             />
           </div>
+          <select 
+            value={filterCampus}
+            onChange={(e) => setFilterCampus(e.target.value)}
+            className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm cursor-pointer"
+          >
+            <option value="">Semua Kampus</option>
+            {uniqueCampuses.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <select 
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value)}
+            className="px-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm cursor-pointer"
+          >
+            <option value="newest">Terbaru</option>
+            <option value="az">Abjad (A-Z)</option>
+            <option value="za">Abjad (Z-A)</option>
+          </select>
           <button 
             onClick={() => setShowAddForm(!showAddForm)}
             className="inline-flex justify-center items-center px-4 py-2 bg-zinc-800 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-700 text-sm font-medium transition-colors whitespace-nowrap"
@@ -612,6 +742,39 @@ function StudentsTab({ token }: { token: string }) {
               <button type="submit" disabled={isAdding} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                 {isAdding && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {isAdding ? 'Menyimpan...' : 'Simpan Mahasiswa'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingStudent && (
+        <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm">
+          <form onSubmit={handleEditSubmit} className="space-y-4">
+            <h3 className="font-medium text-zinc-100 mb-2">Edit Mahasiswa</h3>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">NPM</label>
+                <input name="npm" defaultValue={editingStudent.npm} required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Nama Lengkap</label>
+                <input name="name" defaultValue={editingStudent.name} required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Kampus</label>
+                <input name="campus" defaultValue={editingStudent.campus} required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Password Baru (Opsional)</label>
+                <input name="password" type="password" className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Kosongkan jika tidak diubah" />
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3 pt-2">
+              <button type="button" onClick={() => setEditingStudent(null)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium transition-colors">Batal</button>
+              <button type="submit" disabled={isEditing} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                {isEditing && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {isEditing ? 'Menyimpan...' : 'Simpan Perubahan'}
               </button>
             </div>
           </form>
@@ -721,13 +884,22 @@ function StudentsTab({ token }: { token: string }) {
                         <button onClick={() => setConfirmDeleteStudent(null)} disabled={deletingStudentId === student.id} className="px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-white text-xs font-medium rounded transition-colors disabled:opacity-50">Batal</button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => setConfirmDeleteStudent(student.id)}
-                        className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-900/20 transition-colors"
-                        title="Hapus Mahasiswa"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex space-x-1">
+                        <button
+                          onClick={() => { setEditingStudent(student); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                          className="text-blue-400 hover:text-blue-300 p-1 rounded hover:bg-blue-900/20 transition-colors"
+                          title="Edit Mahasiswa"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteStudent(student.id)}
+                          className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-900/20 transition-colors"
+                          title="Hapus Mahasiswa"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

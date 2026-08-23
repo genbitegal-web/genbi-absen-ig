@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import multer from 'multer';
@@ -9,7 +10,7 @@ import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 3000;
 const SECRET_KEY = process.env.JWT_SECRET || 'supersecret';
 
 const prisma = new PrismaClient();
@@ -56,7 +57,7 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, npm: user.npm, role: user.role, name: user.name, campus: user.campus }, SECRET_KEY, { expiresIn: '1d' });
     res.json({ token, user: { id: user.id, npm: user.npm, name: user.name, role: user.role, campus: user.campus } });
   } catch (error: any) {
-    res.status(500).json({ error: 'Internal server error', details: error.message });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -66,7 +67,7 @@ app.get('/api/auth/me', authMiddleware, async (req: any, res: any) => {
     if (!user) return res.status(404).json({ error: 'Not found' });
     res.json({ user: { id: user.id, npm: user.npm, name: user.name, role: user.role, campus: user.campus } });
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -91,7 +92,7 @@ app.delete('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (r
     await prisma.task.delete({ where: { id: taskId } });
     res.json({ message: 'Tugas berhasil dihapus' });
   } catch (error) {
-    res.status(500).json({ error: 'Gagal menghapus tugas' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -118,7 +119,7 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
     await prisma.user.delete({ where: { id: studentId } });
     res.json({ message: 'Mahasiswa berhasil dihapus' });
   } catch (error) {
-    res.status(500).json({ error: 'Gagal menghapus mahasiswa' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -155,7 +156,7 @@ app.post('/api/admin/students/bulk-delete', authMiddleware, adminMiddleware, asy
     res.json({ message: `${validStudentIds.length} Mahasiswa berhasil dihapus` });
   } catch (error) {
     console.error("Bulk Delete Error:", error);
-    res.status(500).json({ error: 'Gagal menghapus mahasiswa' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -177,15 +178,20 @@ app.post('/api/admin/import-students', authMiddleware, adminMiddleware, async (r
       return res.status(400).json({ error: 'Tidak ada data valid untuk diimport' });
     }
 
+    const totalInput = validStudents.length;
+
     const result = await prisma.user.createMany({
       data: validStudents,
       skipDuplicates: true
     });
 
-    res.json({ message: `${result.count} mahasiswa berhasil diimport.` });
+    const skipped = totalInput - result.count;
+    res.json({ 
+      message: `${result.count} mahasiswa baru berhasil diimport. ${skipped > 0 ? `${skipped} data dilewati (NPM sudah ada).` : ''}`.trim() 
+    });
   } catch (error: any) {
     console.error("Import Error:", error);
-    res.status(500).json({ error: `Gagal import data: ${error.message || 'Server error'}` });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -209,7 +215,28 @@ app.post('/api/admin/students', authMiddleware, adminMiddleware, async (req, res
     });
     res.json(student);
   } catch (error) {
-    res.status(500).json({ error: 'Gagal menambahkan mahasiswa' });
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.put('/api/admin/students/:id', authMiddleware, adminMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { npm, name, campus, password } = req.body;
+  try {
+    const dataToUpdate: any = { npm: String(npm), name, campus };
+    if (password) {
+      dataToUpdate.password = await bcrypt.hash(password, 10);
+    }
+    const updatedStudent = await prisma.user.update({
+      where: { id: parseInt(id) },
+      data: dataToUpdate
+    });
+    res.json(updatedStudent);
+  } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'NPM sudah terdaftar' });
+    }
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -221,15 +248,20 @@ app.get('/api/admin/students', authMiddleware, adminMiddleware, async (req, res)
     });
     res.json(students);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
 app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) => {
-  const { title, description, igPostUrl } = req.body;
+  const { title, description, igPostUrls, igPostUrl } = req.body;
   try {
     const task = await prisma.task.create({
-      data: { title, description, igPostUrl }
+      data: { 
+        title, 
+        description, 
+        igPostUrl: igPostUrl || null,
+        igPostUrls: igPostUrls || []
+      }
     });
 
     // Notify all students
@@ -244,7 +276,7 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
 
     res.json(task);
   } catch (error) {
-    res.status(500).json({ error: 'Gagal membuat tugas' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -260,7 +292,7 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
     });
     res.json(tasks);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -290,7 +322,7 @@ app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, asyn
     res.json({ task, report });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -310,7 +342,7 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
     });
     res.json(tasksWithStatus);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -337,7 +369,7 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
 
     if (uploadError) {
       console.error("Supabase Storage Error:", uploadError);
-      return res.status(500).json({ error: `Gagal mengunggah ke penyimpanan cloud: ${uploadError.message}` });
+      return res.status(500).json({ error: uploadError.message || "Unknown error" });
     }
 
     const { data: publicUrlData } = supabase.storage
@@ -354,7 +386,7 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
     res.json(submission);
   } catch (error: any) {
     console.error("Submission Error:", error);
-    res.status(500).json({ error: `Gagal mengunggah bukti: ${error.message}` });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
@@ -366,7 +398,7 @@ app.get('/api/student/notifications', authMiddleware, async (req: any, res: any)
     });
     res.json(notifications);
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
