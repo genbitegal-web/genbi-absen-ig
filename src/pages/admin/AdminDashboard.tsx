@@ -42,6 +42,7 @@ function TasksTab({ token }: { token: string }) {
   const [errorMsg, setErrorMsg] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
   
   // New state for dynamic URLs
   const [taskUrls, setTaskUrls] = useState<string[]>(['']);
@@ -54,6 +55,46 @@ function TasksTab({ token }: { token: string }) {
     const res = await fetch('/api/admin/tasks', { headers: { Authorization: `Bearer ${token}` } });
     const data = await res.json();
     setTasks(Array.isArray(data) ? data : []);
+  };
+
+  const handleExportAll = async () => {
+    setIsExporting(true);
+    try {
+      const res = await fetch('/api/admin/report/all', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      
+      const { tasks, students, submissions } = data;
+      
+      const wsData: any[][] = [];
+      const headers = ['NPM', 'Nama', 'Kampus'];
+      tasks.forEach((t: any) => headers.push(t.title));
+      wsData.push(headers);
+      
+      students.forEach((student: any) => {
+        const row: any[] = [student.npm, student.name, student.campus];
+        tasks.forEach((t: any) => {
+          const sub = submissions.find((s: any) => s.taskId === t.id && s.studentId === student.id);
+          let status = 'Belum';
+          if (sub) {
+            const totalLinks = t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls.length : (t.igPostUrl ? 1 : 1);
+            const uploadedCount = sub.proofUrls ? sub.proofUrls.filter((u: string) => !!u).length : 0;
+            status = uploadedCount >= totalLinks ? 'Sudah' : `Parsial (${uploadedCount}/${totalLinks})`;
+          }
+          row.push(status);
+        });
+        wsData.push(row);
+      });
+      
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Rekap Semua Tugas");
+      XLSX.writeFile(wb, `Rekap_Tugas_Absensi.xlsx`);
+    } catch (err) {
+      setErrorMsg('Gagal mengekspor rekap');
+      setTimeout(() => setErrorMsg(''), 3000);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -123,15 +164,25 @@ function TasksTab({ token }: { token: string }) {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-xl font-semibold text-zinc-100">Daftar Tugas Absensi</h2>
-        <button 
-          onClick={() => setShowCreate(!showCreate)}
-          className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Tambah Tugas
-        </button>
+        <div className="flex gap-3">
+          <button 
+            onClick={handleExportAll}
+            disabled={isExporting || tasks.length === 0}
+            className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}
+            Export Rekap Semua
+          </button>
+          <button 
+            onClick={() => setShowCreate(!showCreate)}
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Tambah Tugas
+          </button>
+        </div>
       </div>
 
       {errorMsg && (

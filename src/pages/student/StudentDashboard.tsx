@@ -8,7 +8,7 @@ export function StudentDashboard() {
   const [tasks, setTasks] = useState<StudentTask[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploadingId, setUploadingId] = useState<number | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -33,10 +33,11 @@ export function StudentDashboard() {
     }
   };
 
-  const handleUpload = async (taskId: number, file: File) => {
-    setUploadingId(taskId);
+  const handleUpload = async (taskId: number, linkIndex: number, file: File) => {
+    setUploadingId(`${taskId}-${linkIndex}`);
     const formData = new FormData();
     formData.append('proof', file);
+    formData.append('linkIndex', linkIndex.toString());
 
     try {
       const res = await fetch(`/api/student/tasks/${taskId}/submit`, {
@@ -89,43 +90,47 @@ export function StudentDashboard() {
                 )}
               </div>
               
-              <div className="flex flex-col sm:flex-row gap-4 mt-6">
-                <div className="flex-1 flex flex-col gap-2">
-                  {(task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls : [task.igPostUrl]).map((url, i) => url && (
+              <div className="flex flex-col gap-4 mt-6">
+                {(task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls : (task.igPostUrl ? [task.igPostUrl] : [])).map((url, i) => url && (
+                  <div key={i} className="flex flex-col sm:flex-row gap-4 w-full">
                     <a 
-                      key={i}
                       href={url} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="flex justify-center items-center px-4 py-2 bg-zinc-800/50 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors"
+                      className="flex-1 flex justify-center items-center px-4 py-2 bg-zinc-800/50 text-zinc-300 border border-zinc-700 rounded-lg hover:bg-zinc-800 transition-colors"
                     >
                       <ExternalLink className="w-4 h-4 mr-2" />
                       Buka Postingan IG {task.igPostUrls?.length > 1 ? `#${i + 1}` : ''}
                     </a>
-                  ))}
-                </div>
-                
-                {!task.hasUploaded && (
-                  <div className="flex-1">
-                    <label className="w-full flex justify-center items-center px-4 py-2 h-full min-h-[42px] bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-50">
-                      {uploadingId === task.id ? (
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Upload className="w-4 h-4 mr-2" />
-                      )}
-                      {uploadingId === task.id ? 'Mengunggah...' : 'Unggah Bukti'}
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        className="hidden" 
-                        onChange={(e) => {
-                          if (e.target.files?.[0]) handleUpload(task.id, e.target.files[0]);
-                        }}
-                        disabled={uploadingId === task.id}
-                      />
-                    </label>
+                    
+                    {(!task.submission?.proofUrls || !task.submission.proofUrls[i]) ? (
+                      <div className="flex-1">
+                        <label className={`w-full flex justify-center items-center px-4 py-2 h-full min-h-[42px] bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors cursor-pointer disabled:opacity-50 ${uploadingId === `${task.id}-${i}` ? 'opacity-50 pointer-events-none' : ''}`}>
+                          {uploadingId === `${task.id}-${i}` ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : (
+                            <Upload className="w-4 h-4 mr-2" />
+                          )}
+                          {uploadingId === `${task.id}-${i}` ? 'Mengunggah...' : `Unggah Bukti ${task.igPostUrls?.length > 1 ? `#${i + 1}` : ''}`}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files?.[0]) handleUpload(task.id, i, e.target.files[0]);
+                            }}
+                            disabled={uploadingId === `${task.id}-${i}`}
+                          />
+                        </label>
+                      </div>
+                    ) : (
+                      <div className="flex-1 flex justify-center items-center px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg">
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Bukti {task.igPostUrls?.length > 1 ? `#${i + 1}` : ''} Tersimpan
+                      </div>
+                    )}
                   </div>
-                )}
+                ))}
               </div>
             </div>
           ))

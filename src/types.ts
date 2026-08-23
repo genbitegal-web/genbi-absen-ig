@@ -22,7 +22,7 @@ export interface Submission {
   id: number;
   taskId: number;
   studentId: number;
-  proofUrl: string;
+  proofUrls: string[];
   status: string;
   createdAt: string;
 }
@@ -46,6 +46,6 @@ export interface ReportItem {
   name: string;
   campus: string;
   hasUploaded: boolean;
-  proofUrl: string | null;
+  proofUrls: string[];
   submittedAt: string | null;
 }

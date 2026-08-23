@@ -296,6 +296,17 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
   }
 });
 
+app.get('/api/admin/report/all', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const tasks = await prisma.task.findMany({ orderBy: { createdAt: 'asc' } });
+    const students = await prisma.user.findMany({ where: { role: 'STUDENT' }, orderBy: { name: 'asc' } });
+    const submissions = await prisma.submission.findMany();
+    res.json({ tasks, students, submissions });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
 // Report for a specific task (who has liked/uploaded vs who hasn't)
 app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.taskId);
@@ -308,13 +319,15 @@ app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, asyn
 
     const report = students.map(student => {
       const submission = submissions.find(s => s.studentId === student.id);
+      const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
+      const hasUploaded = submission ? submission.proofUrls.filter(url => !!url).length >= totalLinks : false;
       return {
         id: student.id,
         npm: student.npm,
         name: student.name,
         campus: student.campus,
-        hasUploaded: !!submission,
-        proofUrl: submission ? submission.proofUrl : null,
+        hasUploaded,
+        proofUrls: submission ? submission.proofUrls : [],
         submittedAt: submission ? submission.createdAt : null,
       };
     });
@@ -334,9 +347,11 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
 
     const tasksWithStatus = tasks.map(t => {
       const submission = submissions.find(s => s.taskId === t.id);
+      const totalLinks = t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls.length : (t.igPostUrl ? 1 : 1);
+      const hasUploaded = submission ? submission.proofUrls.filter(url => !!url).length >= totalLinks : false;
       return {
         ...t,
-        hasUploaded: !!submission,
+        hasUploaded,
         submission: submission || null,
       };
     });
@@ -349,18 +364,19 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
 app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('proof'), async (req: any, res: any) => {
   const taskId = parseInt(req.params.taskId);
   const studentId = req.user.id;
+  const linkIndex = parseInt(req.body.linkIndex || "0");
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-    const exists = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
-    if (exists) {
-      return res.status(400).json({ error: 'Anda sudah mengunggah bukti untuk tugas ini' });
-    }
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+    
+    const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
 
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
     const fileName = `${uniqueSuffix}-${req.file.originalname.replace(/[^a-zA-Z0-9.]/g, '')}`;
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('proofs')
       .upload(fileName, req.file.buffer, {
         contentType: req.file.mimetype,
@@ -376,13 +392,28 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       .from('proofs')
       .getPublicUrl(fileName);
 
-    const submission = await prisma.submission.create({
-      data: {
-        taskId,
-        studentId,
-        proofUrl: publicUrlData.publicUrl,
-      }
-    });
+    let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
+
+    if (submission) {
+      const newProofUrls = [...submission.proofUrls];
+      while (newProofUrls.length < totalLinks) newProofUrls.push("");
+      newProofUrls[linkIndex] = publicUrlData.publicUrl;
+      submission = await prisma.submission.update({
+        where: { id: submission.id },
+        data: { proofUrls: newProofUrls }
+      });
+    } else {
+      const initialProofUrls = new Array(totalLinks).fill("");
+      initialProofUrls[linkIndex] = publicUrlData.publicUrl;
+      submission = await prisma.submission.create({
+        data: {
+          taskId,
+          studentId,
+          proofUrls: initialProofUrls,
+        }
+      });
+    }
+
     res.json(submission);
   } catch (error: any) {
     console.error("Submission Error:", error);
