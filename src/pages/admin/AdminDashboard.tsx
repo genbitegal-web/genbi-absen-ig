@@ -657,7 +657,12 @@ function StudentsTab({ token }: { token: string }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-xl font-semibold text-zinc-100">Data Mahasiswa Penerima Beasiswa</h2>
+        <h2 className="text-xl font-semibold text-zinc-100 flex items-center gap-2">
+          Data Mahasiswa Penerima Beasiswa
+          <span className="text-sm font-medium px-2.5 py-0.5 bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20">
+            {students.length} Total
+          </span>
+        </h2>
         <div className="flex flex-col sm:flex-row flex-wrap justify-end gap-3 w-full md:w-auto">
           <div className="relative flex-1 sm:flex-none sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
