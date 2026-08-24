@@ -9,19 +9,37 @@ import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = "postgresql://postgres.wfjwukoounzliqpoiwry:keluargagenbitegal@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
+}
+if (!process.env.DIRECT_URL) {
+  process.env.DIRECT_URL = "postgresql://postgres.wfjwukoounzliqpoiwry:keluargagenbitegal@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
+}
+
 const app = express();
 const PORT = 3000;
-const SECRET_KEY = process.env.JWT_SECRET || 'supersecret';
+const SECRET_KEY = process.env.JWT_SECRET || 'kunci_rahasia_genbi_tegal_2024';
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasources: {
+    db: {
+      url: process.env.DATABASE_URL,
+    },
+  },
+});
 const supabase = createClient(
   process.env.SUPABASE_URL || 'https://wfjwukoounzliqpoiwry.supabase.co',
   process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indmand1a29vdW56bGlxcG9pd3J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0OTI4OTksImV4cCI6MjEwMjA2ODg5OX0.EYcs4DW9y0n6iUEQp-vdv27tWAf59R6ODwZSZQSDwkU'
 );
 
-// Setup Multer for memory uploads (Serverless-compatible)
+// Setup Multer for memory uploads with generous size limits (Serverless-compatible)
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB limit
+  },
+});
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -374,12 +392,20 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
     const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
 
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const fileName = `${uniqueSuffix}-${req.file.originalname.replace(/[^a-zA-Z0-9.]/g, '')}`;
+    const originalExt = path.extname(req.file.originalname || '').toLowerCase();
+    const ext = originalExt && originalExt !== '.heic' && originalExt !== '.heif' ? originalExt : '.jpg';
+    const baseClean = req.file.originalname 
+      ? path.basename(req.file.originalname, originalExt).replace(/[^a-zA-Z0-9]/g, '') 
+      : 'proof';
+    const fileName = `${uniqueSuffix}-${baseClean || 'proof'}${ext}`;
+    const contentType = req.file.mimetype && req.file.mimetype !== 'application/octet-stream' 
+      ? req.file.mimetype 
+      : 'image/jpeg';
 
     const { error: uploadError } = await supabase.storage
       .from('proofs')
       .upload(fileName, req.file.buffer, {
-        contentType: req.file.mimetype,
+        contentType,
         upsert: false
       });
 

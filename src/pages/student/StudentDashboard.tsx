@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { StudentTask, Notification } from '../../types';
+import { optimizeImageForUpload } from '../../utils/imageOptimizer';
 import { 
   Bell, 
   Upload, 
@@ -66,11 +67,15 @@ export function StudentDashboard() {
 
   const handleUpload = async (taskId: number, linkIndex: number, file: File) => {
     setUploadingId(`${taskId}-${linkIndex}`);
-    const formData = new FormData();
-    formData.append('proof', file);
-    formData.append('linkIndex', linkIndex.toString());
 
     try {
+      // Automatically optimize / compress image (including iPhone HEIC / high-res photos)
+      const processedFile = await optimizeImageForUpload(file);
+
+      const formData = new FormData();
+      formData.append('proof', processedFile);
+      formData.append('linkIndex', linkIndex.toString());
+
       const res = await fetch(`/api/student/tasks/${taskId}/submit`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -282,10 +287,14 @@ export function StudentDashboard() {
                                   Ganti
                                   <input 
                                     type="file" 
-                                    accept="image/*" 
+                                    accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp" 
                                     className="hidden" 
                                     onChange={(e) => {
-                                      if (e.target.files?.[0]) handleUpload(task.id, i, e.target.files[0]);
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        handleUpload(task.id, i, file);
+                                      }
+                                      e.target.value = '';
                                     }}
                                     disabled={isUploadingThis}
                                   />
@@ -312,13 +321,17 @@ export function StudentDashboard() {
                                 ) : (
                                   <Upload className="w-3.5 h-3.5 mr-1.5" />
                                 )}
-                                {isUploadingThis ? 'Mengunggah...' : `Unggah Foto Bukti ${urls.length > 1 ? `#${i + 1}` : ''}`}
+                                {isUploadingThis ? 'Memproses & Mengunggah...' : `Unggah Foto Bukti ${urls.length > 1 ? `#${i + 1}` : ''}`}
                                 <input 
                                   type="file" 
-                                  accept="image/*" 
+                                  accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp" 
                                   className="hidden" 
                                   onChange={(e) => {
-                                    if (e.target.files?.[0]) handleUpload(task.id, i, e.target.files[0]);
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      handleUpload(task.id, i, file);
+                                    }
+                                    e.target.value = '';
                                   }}
                                   disabled={isUploadingThis}
                                 />
