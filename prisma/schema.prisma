@@ -26,6 +26,8 @@ model Task {
   description String
   igPostUrl   String?
   igPostUrls  String[]     @default([])
+  deadline    DateTime?
+  isOpen      Boolean      @default(true)
   createdAt   DateTime     @default(now())
   submissions Submission[]
 }

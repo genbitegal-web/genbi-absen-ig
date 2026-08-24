@@ -1,7 +1,25 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Task, User, ReportItem } from '../../types';
-import { Users, FileSpreadsheet, Plus, Download, UploadCloud, CheckCircle, XCircle, Trash2, Loader2, Search, Edit } from 'lucide-react';
+import { 
+  Users, 
+  FileSpreadsheet, 
+  Plus, 
+  Download, 
+  UploadCloud, 
+  CheckCircle, 
+  XCircle, 
+  Trash2, 
+  Loader2, 
+  Search, 
+  Edit, 
+  Clock, 
+  Lock, 
+  Unlock, 
+  Calendar, 
+  AlertCircle,
+  X
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 export function AdminDashboard() {
@@ -40,10 +58,16 @@ function TasksTab({ token }: { token: string }) {
   const [reportTask, setReportTask] = useState<number | null>(null);
   const [confirmDeleteTask, setConfirmDeleteTask] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
+  const [togglingTaskId, setTogglingTaskId] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   
+  // Modal for editing deadline
+  const [editingTaskDeadline, setEditingTaskDeadline] = useState<Task | null>(null);
+  const [isSavingDeadline, setIsSavingDeadline] = useState(false);
+
   // New state for dynamic URLs
   const [taskUrls, setTaskUrls] = useState<string[]>(['']);
 
@@ -51,10 +75,69 @@ function TasksTab({ token }: { token: string }) {
     fetchTasks();
   }, []);
 
+  const showNotification = (msg: string, isError = false) => {
+    if (isError) {
+      setErrorMsg(msg);
+      setTimeout(() => setErrorMsg(''), 4000);
+    } else {
+      setSuccessMsg(msg);
+      setTimeout(() => setSuccessMsg(''), 4000);
+    }
+  };
+
   const fetchTasks = async () => {
-    const res = await fetch('/api/admin/tasks', { headers: { Authorization: `Bearer ${token}` } });
-    const data = await res.json();
-    setTasks(Array.isArray(data) ? data : []);
+    try {
+      const res = await fetch('/api/admin/tasks', { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setTasks(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
+      setTasks([]);
+    }
+  };
+
+  const handleToggleTask = async (taskId: number) => {
+    setTogglingTaskId(taskId);
+    try {
+      const res = await fetch(`/api/admin/tasks/${taskId}/toggle`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Gagal mengubah status tugas');
+      const updated = await res.json();
+      showNotification(updated.isOpen ? 'Tugas berhasil dibuka kembali!' : 'Tugas berhasil ditutup!');
+      fetchTasks();
+    } catch (err: any) {
+      showNotification(err.message || 'Gagal mengubah status tugas', true);
+    } finally {
+      setTogglingTaskId(null);
+    }
+  };
+
+  const handleUpdateDeadline = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingTaskDeadline) return;
+    setIsSavingDeadline(true);
+    const formData = new FormData(e.currentTarget);
+    const deadlineVal = formData.get('deadline') as string;
+
+    try {
+      const res = await fetch(`/api/admin/tasks/${editingTaskDeadline.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          deadline: deadlineVal ? new Date(deadlineVal).toISOString() : null
+        })
+      });
+      if (!res.ok) throw new Error('Gagal menyimpan batas waktu');
+      showNotification('Batas waktu tugas berhasil diperbarui!');
+      setEditingTaskDeadline(null);
+      fetchTasks();
+    } catch (err: any) {
+      showNotification(err.message || 'Gagal memperbarui batas waktu', true);
+    } finally {
+      setIsSavingDeadline(false);
+    }
   };
 
   const handleExportAll = async () => {
@@ -89,9 +172,9 @@ function TasksTab({ token }: { token: string }) {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Rekap Semua Tugas");
       XLSX.writeFile(wb, `Rekap_Tugas_Absensi.xlsx`);
+      showNotification('Rekap semua tugas berhasil diunduh!');
     } catch (err) {
-      setErrorMsg('Gagal mengekspor rekap');
-      setTimeout(() => setErrorMsg(''), 3000);
+      showNotification('Gagal mengekspor rekap', true);
     } finally {
       setIsExporting(false);
     }
@@ -102,23 +185,28 @@ function TasksTab({ token }: { token: string }) {
     setIsCreating(true);
     const formData = new FormData(e.currentTarget);
     const validUrls = taskUrls.filter(url => url.trim() !== '');
+    const deadlineVal = formData.get('deadline') as string;
+
     const payload = {
       title: formData.get('title'),
       description: formData.get('description'),
       igPostUrls: validUrls,
+      deadline: deadlineVal ? new Date(deadlineVal).toISOString() : null,
+      isOpen: true
     };
     try {
-      await fetch('/api/admin/tasks', {
+      const res = await fetch('/api/admin/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
       });
+      if (!res.ok) throw new Error('Gagal membuat tugas');
       setShowCreate(false);
       setTaskUrls(['']);
+      showNotification('Tugas baru berhasil dibuat & diumumkan!');
       fetchTasks();
     } catch (err) {
-      setErrorMsg('Gagal membuat tugas');
-      setTimeout(() => setErrorMsg(''), 3000);
+      showNotification('Gagal membuat tugas', true);
     } finally {
       setIsCreating(false);
     }
@@ -151,10 +239,10 @@ function TasksTab({ token }: { token: string }) {
       });
       if (!res.ok) throw new Error('Gagal');
       setConfirmDeleteTask(null);
+      showNotification('Tugas berhasil dihapus');
       fetchTasks();
     } catch (err) {
-      setErrorMsg('Gagal menghapus tugas');
-      setTimeout(() => setErrorMsg(''), 3000);
+      showNotification('Gagal menghapus tugas', true);
     } finally {
       setDeletingTaskId(null);
     }
@@ -165,19 +253,22 @@ function TasksTab({ token }: { token: string }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-xl font-semibold text-zinc-100">Daftar Tugas Absensi</h2>
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-100">Daftar Tugas Absensi</h2>
+          <p className="text-xs text-zinc-400 mt-0.5">Kelola batas waktu, buka/tutup pengumpulan, dan rekap hasil tugas mahasiswa</p>
+        </div>
         <div className="flex gap-3">
           <button 
             onClick={handleExportAll}
             disabled={isExporting || tasks.length === 0}
-            className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm font-medium transition-colors disabled:opacity-50"
+            className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm font-medium transition-colors disabled:opacity-50 shadow-sm"
           >
             {isExporting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileSpreadsheet className="w-4 h-4 mr-2" />}
             Export Rekap Semua
           </button>
           <button 
             onClick={() => setShowCreate(!showCreate)}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium"
+            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm font-medium shadow-sm"
           >
             <Plus className="w-4 h-4 mr-2" />
             Tambah Tugas
@@ -186,22 +277,51 @@ function TasksTab({ token }: { token: string }) {
       </div>
 
       {errorMsg && (
-        <div className="p-4 bg-red-900/30 border border-red-900 text-red-300 rounded-lg text-sm">
+        <div className="p-4 bg-red-900/30 border border-red-900 text-red-300 rounded-lg text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
           {errorMsg}
         </div>
       )}
 
+      {successMsg && (
+        <div className="p-4 bg-emerald-900/30 border border-emerald-900 text-emerald-300 rounded-lg text-sm flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+          {successMsg}
+        </div>
+      )}
+
       {showCreate && (
-        <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm">
+        <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl animate-fade-in">
+          <h3 className="text-lg font-semibold text-zinc-100 mb-4 flex items-center gap-2">
+            <Plus className="w-5 h-5 text-blue-400" />
+            Buat Tugas Baru
+          </h3>
           <form onSubmit={handleCreate} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Judul Tugas</label>
-              <input name="title" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Misal: Like & Komen Postingan Baru" />
+              <input name="title" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Misal: Like, Komen & Repost Postingan Instagram" />
             </div>
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Deskripsi</label>
-              <textarea name="description" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" rows={3} placeholder="Instruksi detail..."></textarea>
+              <textarea name="description" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" rows={3} placeholder="Instruksi detail mengenai tugas..."></textarea>
             </div>
+
+            {/* Set Deadline (Optional) */}
+            <div className="bg-zinc-950/70 p-4 rounded-xl border border-zinc-800">
+              <label className="block text-sm font-medium text-zinc-200 mb-1 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-blue-400" />
+                Batas Waktu Pengumpulan (Deadline) <span className="text-xs font-normal text-zinc-400">(Opsional)</span>
+              </label>
+              <p className="text-xs text-zinc-400 mb-2">
+                Jika diisi, tugas akan otomatis ditutup saat melewati waktu ini. Anda tetap bisa membuka/memperpanjangnya kapan saja.
+              </p>
+              <input 
+                type="datetime-local" 
+                name="deadline" 
+                className="px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+              />
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">URL / Link Tugas (Bisa Lebih Dari Satu)</label>
               <div className="space-y-2">
@@ -229,14 +349,14 @@ function TasksTab({ token }: { token: string }) {
                 <button 
                   type="button" 
                   onClick={addUrlField}
-                  className="inline-flex items-center text-sm text-blue-400 hover:text-blue-300 mt-2"
+                  className="inline-flex items-center text-sm text-blue-400 hover:text-blue-300 mt-2 font-medium"
                 >
                   <Plus className="w-4 h-4 mr-1" />
                   Tambah URL Lainnya
                 </button>
               </div>
             </div>
-            <div className="flex justify-end space-x-3">
+            <div className="flex justify-end space-x-3 pt-2">
               <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium">Batal</button>
               <button type="submit" disabled={isCreating} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium disabled:opacity-50">
                 {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -247,46 +367,196 @@ function TasksTab({ token }: { token: string }) {
         </div>
       )}
 
+      {/* Task Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {tasks.map(task => (
-          <div key={task.id} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm flex flex-col">
-            <h3 className="font-semibold text-lg text-zinc-100 line-clamp-1">{task.title}</h3>
-            <p className="text-zinc-400 text-sm mt-1 mb-4 flex-1 line-clamp-2">{task.description}</p>
-            <div className="flex justify-between items-center text-sm mb-4">
-              <span className="text-zinc-500">{new Date(task.createdAt).toLocaleDateString('id-ID')}</span>
-              <span className="font-medium text-blue-400">{task._count?.submissions || 0} Pengumpulan</span>
-            </div>
-            {confirmDeleteTask === task.id ? (
-              <div className="flex flex-col space-y-2">
-                <p className="text-xs text-red-400 font-medium text-center">Yakin ingin menghapus?</p>
-                <div className="flex space-x-2">
-                  <button onClick={() => handleDeleteTask(task.id)} disabled={deletingTaskId === task.id} className="flex-1 flex justify-center items-center py-2 bg-red-600/90 text-white hover:bg-red-500 rounded-lg font-medium text-sm transition-colors disabled:opacity-50">
-                    {deletingTaskId === task.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
-                    Hapus
-                  </button>
-                  <button onClick={() => setConfirmDeleteTask(null)} disabled={deletingTaskId === task.id} className="flex-1 py-2 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 border border-zinc-700 rounded-lg font-medium text-sm transition-colors disabled:opacity-50">Batal</button>
+        {tasks.map(task => {
+          const now = new Date();
+          const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
+          const isClosed = !task.isOpen || isPassedDeadline;
+
+          return (
+            <div key={task.id} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm flex flex-col justify-between transition-all hover:border-zinc-700">
+              <div>
+                {/* Header with Status Badge */}
+                <div className="flex justify-between items-start gap-2 mb-2">
+                  <h3 className="font-semibold text-lg text-zinc-100 line-clamp-1">{task.title}</h3>
+                  {isClosed ? (
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
+                      !task.isOpen 
+                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                        : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                    }`}>
+                      <Lock className="w-3 h-3 mr-1" />
+                      {!task.isOpen ? 'Ditutup Manual' : 'Ditutup (Waktu Habis)'}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                      <Unlock className="w-3 h-3 mr-1" />
+                      Terbuka
+                    </span>
+                  )}
+                </div>
+
+                <p className="text-zinc-400 text-sm mb-4 line-clamp-2">{task.description}</p>
+
+                {/* Deadline & Submissions Info */}
+                <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800/80 mb-4 space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between text-zinc-400">
+                    <span className="flex items-center gap-1.5 text-zinc-300">
+                      <Clock className="w-3.5 h-3.5 text-blue-400" />
+                      Batas Waktu:
+                    </span>
+                    <span className={task.deadline && isPassedDeadline ? 'text-red-400 font-medium' : 'text-zinc-300'}>
+                      {task.deadline 
+                        ? new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) + ' WIB'
+                        : 'Tanpa Batas'}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-zinc-400 pt-1 border-t border-zinc-800/50">
+                    <span>Pengumpulan:</span>
+                    <span className="font-medium text-blue-400">{task._count?.submissions || 0} Mahasiswa</span>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex space-x-2">
+
+              {/* Action Buttons */}
+              <div>
+                {confirmDeleteTask === task.id ? (
+                  <div className="flex flex-col space-y-2">
+                    <p className="text-xs text-red-400 font-medium text-center">Yakin ingin menghapus tugas ini?</p>
+                    <div className="flex space-x-2">
+                      <button onClick={() => handleDeleteTask(task.id)} disabled={deletingTaskId === task.id} className="flex-1 flex justify-center items-center py-2 bg-red-600 text-white hover:bg-red-500 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">
+                        {deletingTaskId === task.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                        Hapus
+                      </button>
+                      <button onClick={() => setConfirmDeleteTask(null)} disabled={deletingTaskId === task.id} className="flex-1 py-2 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">Batal</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      {/* Toggle Open/Close Button */}
+                      <button
+                        onClick={() => handleToggleTask(task.id)}
+                        disabled={togglingTaskId === task.id}
+                        className={`flex-1 inline-flex items-center justify-center py-2 px-3 rounded-lg text-xs font-semibold transition-colors border ${
+                          isClosed 
+                            ? 'bg-emerald-600/10 text-emerald-400 border-emerald-600/30 hover:bg-emerald-600/20' 
+                            : 'bg-amber-600/10 text-amber-400 border-amber-600/30 hover:bg-amber-600/20'
+                        }`}
+                        title={isClosed ? 'Buka kembali pengumpulan tugas ini' : 'Tutup pengumpulan tugas ini'}
+                      >
+                        {togglingTaskId === task.id ? (
+                          <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                        ) : isClosed ? (
+                          <Unlock className="w-3.5 h-3.5 mr-1" />
+                        ) : (
+                          <Lock className="w-3.5 h-3.5 mr-1" />
+                        )}
+                        {isClosed ? 'Buka Tugas' : 'Tutup Tugas'}
+                      </button>
+
+                      {/* Edit Deadline Button */}
+                      <button
+                        onClick={() => setEditingTaskDeadline(task)}
+                        className="py-2 px-3 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 rounded-lg text-xs font-medium transition-colors inline-flex items-center"
+                        title="Atur / Ubah Batas Waktu"
+                      >
+                        <Clock className="w-3.5 h-3.5 mr-1 text-blue-400" />
+                        Deadline
+                      </button>
+                    </div>
+
+                    <div className="flex space-x-2">
+                      <button 
+                        onClick={() => setReportTask(task.id)}
+                        className="flex-1 py-2 bg-blue-600/10 hover:bg-blue-600/20 text-blue-400 border border-blue-500/20 rounded-lg font-medium text-xs transition-colors"
+                      >
+                        Lihat Laporan
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteTask(task.id)}
+                        className="p-2 bg-red-900/20 text-red-400 hover:bg-red-900/40 border border-red-900/50 rounded-lg transition-colors"
+                        title="Hapus Tugas"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* MODAL: Edit Task Deadline */}
+      {editingTaskDeadline && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+          onClick={() => setEditingTaskDeadline(null)}
+        >
+          <div 
+            className="bg-zinc-900 border border-zinc-700 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4 border-b border-zinc-800 pb-3">
+              <h4 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-blue-400" />
+                Atur Batas Waktu (Deadline)
+              </h4>
+              <button 
+                type="button"
+                onClick={() => setEditingTaskDeadline(null)}
+                className="p-1 text-zinc-400 hover:text-white rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-400 mb-4">
+              Ubah atau perpanjang batas waktu untuk tugas <strong>"{editingTaskDeadline.title}"</strong>. Kosongkan input jika ingin menghapus batas waktu (tanpa batas).
+            </p>
+
+            <form onSubmit={handleUpdateDeadline} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1">
+                  Batas Waktu Baru
+                </label>
+                <input 
+                  type="datetime-local" 
+                  name="deadline" 
+                  defaultValue={
+                    editingTaskDeadline.deadline 
+                      ? new Date(new Date(editingTaskDeadline.deadline).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) 
+                      : ''
+                  }
+                  className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
                 <button 
-                  onClick={() => setReportTask(task.id)}
-                  className="flex-1 py-2 bg-zinc-800/50 text-zinc-300 hover:bg-zinc-800 border border-zinc-700 rounded-lg font-medium text-sm transition-colors"
+                  type="button" 
+                  onClick={() => setEditingTaskDeadline(null)}
+                  className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg text-xs font-medium border border-zinc-700"
                 >
-                  Lihat Laporan
+                  Batal
                 </button>
-                <button
-                  onClick={() => setConfirmDeleteTask(task.id)}
-                  className="p-2 bg-red-900/20 text-red-400 hover:bg-red-900/40 border border-red-900/50 rounded-lg transition-colors"
-                  title="Hapus Tugas"
+                <button 
+                  type="submit" 
+                  disabled={isSavingDeadline}
+                  className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold disabled:opacity-50"
                 >
-                  <Trash2 className="w-5 h-5" />
+                  {isSavingDeadline && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
+                  {isSavingDeadline ? 'Menyimpan...' : 'Simpan Batas Waktu'}
                 </button>
               </div>
-            )}
+            </form>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

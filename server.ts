@@ -98,10 +98,12 @@ app.delete('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (r
 
     const submissions = await prisma.submission.findMany({ where: { taskId } });
     for (const sub of submissions) {
-      if (sub.proofUrl) {
-        const fileName = sub.proofUrl.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('proofs').remove([fileName]);
+      if (Array.isArray(sub.proofUrls)) {
+        const fileNames = sub.proofUrls
+          .map(url => url ? url.split('/').pop() : null)
+          .filter((f): f is string => Boolean(f));
+        if (fileNames.length > 0) {
+          await supabase.storage.from('proofs').remove(fileNames);
         }
       }
     }
@@ -109,7 +111,7 @@ app.delete('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (r
     await prisma.submission.deleteMany({ where: { taskId } });
     await prisma.task.delete({ where: { id: taskId } });
     res.json({ message: 'Tugas berhasil dihapus' });
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -124,10 +126,12 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
 
     const submissions = await prisma.submission.findMany({ where: { studentId } });
     for (const sub of submissions) {
-      if (sub.proofUrl) {
-        const fileName = sub.proofUrl.split('/').pop();
-        if (fileName) {
-          await supabase.storage.from('proofs').remove([fileName]);
+      if (Array.isArray(sub.proofUrls)) {
+        const fileNames = sub.proofUrls
+          .map(url => url ? url.split('/').pop() : null)
+          .filter((f): f is string => Boolean(f));
+        if (fileNames.length > 0) {
+          await supabase.storage.from('proofs').remove(fileNames);
         }
       }
     }
@@ -136,7 +140,7 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
     await prisma.notification.deleteMany({ where: { userId: studentId } });
     await prisma.user.delete({ where: { id: studentId } });
     res.json({ message: 'Mahasiswa berhasil dihapus' });
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -159,9 +163,15 @@ app.post('/api/admin/students/bulk-delete', authMiddleware, adminMiddleware, asy
     }
 
     const submissions = await prisma.submission.findMany({ where: { studentId: { in: validStudentIds } } });
-    const filesToDelete = submissions
-      .map(sub => sub.proofUrl ? sub.proofUrl.split('/').pop() : null)
-      .filter((f): f is string => f !== null);
+    const filesToDelete: string[] = [];
+    for (const sub of submissions) {
+      if (Array.isArray(sub.proofUrls)) {
+        for (const url of sub.proofUrls) {
+          const fn = url ? url.split('/').pop() : null;
+          if (fn) filesToDelete.push(fn);
+        }
+      }
+    }
 
     if (filesToDelete.length > 0) {
       await supabase.storage.from('proofs').remove(filesToDelete);
@@ -271,29 +281,71 @@ app.get('/api/admin/students', authMiddleware, adminMiddleware, async (req, res)
 });
 
 app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) => {
-  const { title, description, igPostUrls, igPostUrl } = req.body;
+  const { title, description, igPostUrls, igPostUrl, deadline, isOpen } = req.body;
   try {
     const task = await prisma.task.create({
       data: { 
         title, 
         description, 
         igPostUrl: igPostUrl || null,
-        igPostUrls: igPostUrls || []
+        igPostUrls: igPostUrls || [],
+        deadline: deadline ? new Date(deadline) : null,
+        isOpen: isOpen !== undefined ? Boolean(isOpen) : true
       }
     });
 
     // Notify all students
     const students = await prisma.user.findMany({ where: { role: 'STUDENT' } });
     if (students.length > 0) {
+      const deadlineText = task.deadline 
+        ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })})` 
+        : '';
       const notifications = students.map(s => ({
         userId: s.id,
-        message: `Tugas Baru: ${title}. Segera berikan like, komen, dan repost!`,
+        message: `Tugas Baru: ${title}${deadlineText}. Segera berikan like, komen, dan repost!`,
       }));
       await prisma.notification.createMany({ data: notifications });
     }
 
     res.json(task);
-  } catch (error) {
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.patch('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  const { title, description, igPostUrls, deadline, isOpen } = req.body;
+  try {
+    const updateData: any = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (igPostUrls !== undefined) updateData.igPostUrls = igPostUrls;
+    if (deadline !== undefined) updateData.deadline = deadline ? new Date(deadline) : null;
+    if (isOpen !== undefined) updateData.isOpen = Boolean(isOpen);
+
+    const task = await prisma.task.update({
+      where: { id: taskId },
+      data: updateData
+    });
+    res.json(task);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.patch('/api/admin/tasks/:taskId/toggle', authMiddleware, adminMiddleware, async (req, res) => {
+  const taskId = parseInt(req.params.taskId);
+  try {
+    const current = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!current) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+
+    const updated = await prisma.task.update({
+      where: { id: taskId },
+      data: { isOpen: !current.isOpen }
+    });
+    res.json(updated);
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -308,8 +360,15 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
         }
       }
     });
-    res.json(tasks);
-  } catch (error) {
+
+    const now = new Date();
+    const tasksWithClosedStatus = tasks.map(t => ({
+      ...t,
+      isClosed: !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false)
+    }));
+
+    res.json(tasksWithClosedStatus);
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -363,18 +422,21 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
     const tasks = await prisma.task.findMany({ orderBy: { createdAt: 'desc' } });
     const submissions = await prisma.submission.findMany({ where: { studentId: req.user.id } });
 
+    const now = new Date();
     const tasksWithStatus = tasks.map(t => {
       const submission = submissions.find(s => s.taskId === t.id);
       const totalLinks = t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls.length : (t.igPostUrl ? 1 : 1);
       const hasUploaded = submission ? submission.proofUrls.filter(url => !!url).length >= totalLinks : false;
+      const isClosed = !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false);
       return {
         ...t,
         hasUploaded,
+        isClosed,
         submission: submission || null,
       };
     });
     res.json(tasksWithStatus);
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -388,6 +450,11 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
 
     const task = await prisma.task.findUnique({ where: { id: taskId } });
     if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+
+    const isClosed = !task.isOpen || (task.deadline ? new Date() > new Date(task.deadline) : false);
+    if (isClosed) {
+      return res.status(403).json({ error: 'Tugas ini telah ditutup atau telah melewati batas waktu pengumpulan.' });
+    }
     
     const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
 
@@ -458,6 +525,11 @@ app.post('/api/student/tasks/:taskId/finalize', authMiddleware, async (req: any,
     const task = await prisma.task.findUnique({ where: { id: taskId } });
     if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
 
+    const isClosed = !task.isOpen || (task.deadline ? new Date() > new Date(task.deadline) : false);
+    if (isClosed) {
+      return res.status(403).json({ error: 'Tugas ini telah ditutup atau telah melewati batas waktu pengumpulan.' });
+    }
+
     const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
     const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
 
@@ -487,6 +559,14 @@ app.post('/api/student/tasks/:taskId/remove-proof', authMiddleware, async (req: 
   const studentId = req.user.id;
   const linkIndex = parseInt(req.body.linkIndex || "0");
   try {
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+
+    const isClosed = !task.isOpen || (task.deadline ? new Date() > new Date(task.deadline) : false);
+    if (isClosed) {
+      return res.status(403).json({ error: 'Tugas ini telah ditutup atau telah melewati batas waktu pengumpulan.' });
+    }
+
     const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
     if (!submission) {
       return res.status(404).json({ error: 'Data pengumpulan tidak ditemukan' });

@@ -16,7 +16,8 @@ import {
   AlertCircle, 
   ImageIcon, 
   Check,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 
 export function StudentDashboard() {
@@ -187,10 +188,16 @@ export function StudentDashboard() {
             const isAllUploaded = uploadedCount >= totalLinks;
             const isSubmitted = task.submission?.status === 'SUBMITTED' || (task.hasUploaded && isAllUploaded);
 
+            const now = new Date();
+            const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
+            const isTaskClosed = task.isClosed || !task.isOpen || isPassedDeadline;
+
             return (
-              <div key={task.id} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm transition-all hover:border-zinc-700/80">
+              <div key={task.id} className={`bg-zinc-900 p-6 rounded-xl border transition-all ${
+                isTaskClosed && !isSubmitted ? 'border-red-900/40 bg-zinc-900/90' : 'border-zinc-800 hover:border-zinc-700/80'
+              } shadow-sm`}>
                 {/* Task Header */}
-                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-4">
+                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-3">
                   <div>
                     <h3 className="text-xl font-semibold text-zinc-100">{task.title}</h3>
                     <p className="text-zinc-400 mt-1 text-sm leading-relaxed">{task.description}</p>
@@ -200,6 +207,11 @@ export function StudentDashboard() {
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
                         <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
                         Selesai Disubmit
+                      </span>
+                    ) : isTaskClosed ? (
+                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20 whitespace-nowrap">
+                        <Lock className="w-3.5 h-3.5 mr-1.5" />
+                        Ditutup
                       </span>
                     ) : isAllUploaded ? (
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 whitespace-nowrap">
@@ -215,8 +227,36 @@ export function StudentDashboard() {
                   </div>
                 </div>
 
+                {/* Deadline Info Bar */}
+                {task.deadline && (
+                  <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg mb-4 border ${
+                    isPassedDeadline 
+                      ? 'bg-red-950/30 border-red-900/50 text-red-300' 
+                      : 'bg-zinc-950/60 border-zinc-800 text-zinc-300'
+                  }`}>
+                    <Clock className={`w-3.5 h-3.5 ${isPassedDeadline ? 'text-red-400' : 'text-blue-400'} shrink-0`} />
+                    <span>
+                      Batas Waktu Pengumpulan: <strong>{new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })} WIB</strong>
+                    </span>
+                    {isPassedDeadline && <span className="font-semibold text-red-400 ml-auto">(Waktu Telah Habis)</span>}
+                  </div>
+                )}
+
+                {/* Notice if task is closed and not submitted */}
+                {isTaskClosed && !isSubmitted && (
+                  <div className="p-3.5 bg-red-950/40 border border-red-900/60 rounded-xl text-xs text-red-300 flex items-start gap-2.5 mb-4">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold text-red-200">Pengumpulan Tugas Telah Ditutup</p>
+                      <p className="text-red-300/90 mt-0.5">
+                        Tugas ini telah ditutup oleh Admin atau telah melewati batas waktu yang ditentukan. Anda tidak dapat mengunggah atau mengubah bukti pengumpulan lagi.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* Link & Upload Rows */}
-                <div className="space-y-3 mt-5">
+                <div className="space-y-3 mt-4">
                   {urls.map((url, i) => {
                     const hasProof = Boolean(proofUrls[i] && proofUrls[i].trim());
                     const currentProofUrl = proofUrls[i] || '';
@@ -277,31 +317,33 @@ export function StudentDashboard() {
                                   Cek Foto
                                 </button>
 
-                                {/* Replace / Re-upload Button */}
-                                <label className={`inline-flex items-center px-2.5 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md transition-colors cursor-pointer ${isUploadingThis ? 'opacity-50 pointer-events-none' : ''}`}>
-                                  {isUploadingThis ? (
-                                    <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-blue-400" />
-                                  ) : (
-                                    <RefreshCw className="w-3.5 h-3.5 mr-1 text-zinc-400" />
-                                  )}
-                                  Ganti
-                                  <input 
-                                    type="file" 
-                                    accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp" 
-                                    className="hidden" 
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        handleUpload(task.id, i, file);
-                                      }
-                                      e.target.value = '';
-                                    }}
-                                    disabled={isUploadingThis}
-                                  />
-                                </label>
+                                {/* Replace / Re-upload Button (Disabled if closed or already submitted) */}
+                                {!isSubmitted && !isTaskClosed && (
+                                  <label className={`inline-flex items-center px-2.5 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md transition-colors cursor-pointer ${isUploadingThis ? 'opacity-50 pointer-events-none' : ''}`}>
+                                    {isUploadingThis ? (
+                                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-blue-400" />
+                                    ) : (
+                                      <RefreshCw className="w-3.5 h-3.5 mr-1 text-zinc-400" />
+                                    )}
+                                    Ganti
+                                    <input 
+                                      type="file" 
+                                      accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp" 
+                                      className="hidden" 
+                                      onChange={(e) => {
+                                        const file = e.target.files?.[0];
+                                        if (file) {
+                                          handleUpload(task.id, i, file);
+                                        }
+                                        e.target.value = '';
+                                      }}
+                                      disabled={isUploadingThis}
+                                    />
+                                  </label>
+                                )}
 
                                 {/* Delete Proof Button */}
-                                {!isSubmitted && (
+                                {!isSubmitted && !isTaskClosed && (
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveProof(task.id, i)}
@@ -313,6 +355,12 @@ export function StudentDashboard() {
                                   </button>
                                 )}
                               </div>
+                            ) : isTaskClosed ? (
+                              /* Closed badge for missing proof */
+                              <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-zinc-500 bg-zinc-800/80 border border-zinc-700/50 rounded-lg">
+                                <Lock className="w-3.5 h-3.5 mr-1.5 text-zinc-500" />
+                                Pengumpulan Ditutup
+                              </span>
                             ) : (
                               /* Upload Button */
                               <label className={`inline-flex items-center px-3.5 py-1.5 text-xs font-medium bg-blue-600 text-white hover:bg-blue-500 rounded-lg transition-colors cursor-pointer ${isUploadingThis ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -347,8 +395,20 @@ export function StudentDashboard() {
                 {/* Task Footer & Final Submit Button */}
                 <div className="mt-6 pt-4 border-t border-zinc-800 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
                   <div className="text-xs text-zinc-400 flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${isAllUploaded ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                    {isAllUploaded 
+                    <span className={`w-2 h-2 rounded-full ${
+                      isSubmitted 
+                        ? 'bg-emerald-400' 
+                        : isTaskClosed 
+                        ? 'bg-red-400' 
+                        : isAllUploaded 
+                        ? 'bg-blue-400' 
+                        : 'bg-amber-400'
+                    }`} />
+                    {isSubmitted 
+                      ? 'Tugas ini telah Anda selesaikan.' 
+                      : isTaskClosed 
+                      ? 'Batas waktu pengumpulan telah berakhir.' 
+                      : isAllUploaded 
                       ? 'Semua foto bukti telah terisi. Pastikan foto sudah benar sebelum mengirim.'
                       : `Belum lengkap: baru ${uploadedCount} dari ${totalLinks} foto bukti yang diunggah.`
                     }
@@ -371,6 +431,11 @@ export function StudentDashboard() {
                           Terkirim
                         </span>
                       </div>
+                    ) : isTaskClosed ? (
+                      <span className="inline-flex items-center px-3.5 py-2 text-xs font-medium bg-zinc-800/80 text-zinc-500 border border-zinc-700/50 rounded-lg">
+                        <Lock className="w-3.5 h-3.5 mr-1.5" />
+                        Tidak Dapat Disubmit
+                      </span>
                     ) : (
                       /* Final Submit Button */
                       <button

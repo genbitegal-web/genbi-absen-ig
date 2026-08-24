@@ -12,6 +12,9 @@ export interface Task {
   description: string;
   igPostUrl?: string;
   igPostUrls: string[];
+  deadline?: string | null;
+  isOpen: boolean;
+  isClosed?: boolean;
   createdAt: string;
   _count?: {
     submissions: number;
