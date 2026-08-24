@@ -444,8 +444,20 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
                     )}
                   </td>
                   <td className="px-6 py-4">
-                    {item.proofUrl ? (
-                      <a href={item.proofUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Lihat Bukti</a>
+                    {item.proofUrls && item.proofUrls.length > 0 && item.proofUrls.some(u => !!u) ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {item.proofUrls.map((url, idx) => url ? (
+                          <a 
+                            key={idx} 
+                            href={url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="inline-flex items-center px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded hover:bg-blue-500/20 text-xs transition-colors"
+                          >
+                            Bukti #{idx + 1}
+                          </a>
+                        ) : null)}
+                      </div>
                     ) : '-'}
                   </td>
                 </tr>

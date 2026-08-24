@@ -400,7 +400,10 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       newProofUrls[linkIndex] = publicUrlData.publicUrl;
       submission = await prisma.submission.update({
         where: { id: submission.id },
-        data: { proofUrls: newProofUrls }
+        data: { 
+          proofUrls: newProofUrls,
+          status: 'PENDING'
+        }
       });
     } else {
       const initialProofUrls = new Array(totalLinks).fill("");
@@ -410,6 +413,7 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
           taskId,
           studentId,
           proofUrls: initialProofUrls,
+          status: 'PENDING'
         }
       });
     }
@@ -417,6 +421,67 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
     res.json(submission);
   } catch (error: any) {
     console.error("Submission Error:", error);
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.post('/api/student/tasks/:taskId/finalize', authMiddleware, async (req: any, res: any) => {
+  const taskId = parseInt(req.params.taskId);
+  const studentId = req.user.id;
+  try {
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+
+    const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
+    const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
+
+    if (!submission) {
+      return res.status(400).json({ error: 'Belum ada bukti foto yang diunggah' });
+    }
+
+    const uploadedCount = submission.proofUrls.filter(url => !!url).length;
+    if (uploadedCount < totalLinks) {
+      return res.status(400).json({ error: `Harap lengkapi semua foto bukti (${uploadedCount}/${totalLinks} terunggah)` });
+    }
+
+    const updated = await prisma.submission.update({
+      where: { id: submission.id },
+      data: { status: 'SUBMITTED' }
+    });
+
+    res.json({ message: 'Tugas berhasil disubmit!', submission: updated });
+  } catch (error: any) {
+    console.error("Finalize Error:", error);
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.post('/api/student/tasks/:taskId/remove-proof', authMiddleware, async (req: any, res: any) => {
+  const taskId = parseInt(req.params.taskId);
+  const studentId = req.user.id;
+  const linkIndex = parseInt(req.body.linkIndex || "0");
+  try {
+    const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
+    if (!submission) {
+      return res.status(404).json({ error: 'Data pengumpulan tidak ditemukan' });
+    }
+
+    const newProofUrls = [...submission.proofUrls];
+    if (newProofUrls[linkIndex]) {
+      newProofUrls[linkIndex] = "";
+    }
+
+    const updated = await prisma.submission.update({
+      where: { id: submission.id },
+      data: {
+        proofUrls: newProofUrls,
+        status: 'PENDING'
+      }
+    });
+
+    res.json({ message: 'Bukti berhasil dihapus', submission: updated });
+  } catch (error: any) {
+    console.error("Remove Proof Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
