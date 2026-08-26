@@ -705,7 +705,11 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
                   <td className="px-6 py-4">
                     {item.hasUploaded ? (
                       <span className="inline-flex items-center text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded-full text-xs font-medium">
-                        <CheckCircle className="w-3 h-3 mr-1" /> Sudah
+                        <CheckCircle className="w-3 h-3 mr-1" /> Selesai
+                      </span>
+                    ) : item.proofUrls && item.proofUrls.filter(Boolean).length > 0 ? (
+                      <span className="inline-flex items-center text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded-full text-xs font-medium">
+                        <Clock className="w-3 h-3 mr-1" /> Draft / Belum Submit
                       </span>
                     ) : (
                       <span className="inline-flex items-center text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-full text-xs font-medium">

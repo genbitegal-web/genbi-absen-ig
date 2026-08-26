@@ -17,7 +17,8 @@ import {
   ImageIcon, 
   Check,
   RefreshCw,
-  Lock
+  Lock,
+  RotateCcw
 } from 'lucide-react';
 
 export function StudentDashboard() {
@@ -28,6 +29,7 @@ export function StudentDashboard() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [finalizingId, setFinalizingId] = useState<number | null>(null);
+  const [unsubmittingId, setUnsubmittingId] = useState<number | null>(null);
 
   // Modal preview photo state
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; title: string; linkNumber?: number } | null>(null);
@@ -147,6 +149,32 @@ export function StudentDashboard() {
     }
   };
 
+  const handleUnsubmit = async (taskId: number) => {
+    if (!window.confirm('Batalkan submit tugas ini? Anda dapat mengganti foto bukti dan mengirimkannya kembali sebelum batas waktu berakhir.')) {
+      return;
+    }
+    setUnsubmittingId(taskId);
+    try {
+      const res = await fetch(`/api/student/tasks/${taskId}/unsubmit`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || 'Submit tugas berhasil dibatalkan. Anda dapat mengganti foto bukti.');
+        setConfirmSubmitTask(null);
+        await fetchData();
+      } else {
+        showToast(data.error || 'Gagal membatalkan submit', 'error');
+      }
+    } catch (error) {
+      console.error('Error unsubmitting task', error);
+      showToast('Terjadi kesalahan saat membatalkan submit', 'error');
+    } finally {
+      setUnsubmittingId(null);
+    }
+  };
+
   if (loading) return <div className="text-center p-8 text-zinc-400">Memuat data tugas...</div>;
 
   return (
@@ -168,7 +196,7 @@ export function StudentDashboard() {
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-zinc-100">Daftar Tugas Absensi</h2>
           <span className="text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg">
-            {tasks.filter(t => t.submission?.status === 'SUBMITTED' || t.hasUploaded).length} dari {tasks.length} Selesai
+            {tasks.filter(t => t.submission?.status === 'SUBMITTED').length} dari {tasks.length} Selesai
           </span>
         </div>
 
@@ -186,7 +214,7 @@ export function StudentDashboard() {
             const proofUrls = task.submission?.proofUrls || [];
             const uploadedCount = proofUrls.filter(url => Boolean(url && url.trim())).length;
             const isAllUploaded = uploadedCount >= totalLinks;
-            const isSubmitted = task.submission?.status === 'SUBMITTED' || (task.hasUploaded && isAllUploaded);
+            const isSubmitted = task.submission?.status === 'SUBMITTED';
 
             const now = new Date();
             const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
@@ -317,8 +345,8 @@ export function StudentDashboard() {
                                   Cek Foto
                                 </button>
 
-                                {/* Replace / Re-upload Button (Disabled if closed or already submitted) */}
-                                {!isSubmitted && !isTaskClosed && (
+                                {/* Replace / Re-upload Button (Allowed as long as task is not closed) */}
+                                {!isTaskClosed && (
                                   <label className={`inline-flex items-center px-2.5 py-1 text-xs font-medium text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-md transition-colors cursor-pointer ${isUploadingThis ? 'opacity-50 pointer-events-none' : ''}`}>
                                     {isUploadingThis ? (
                                       <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-blue-400" />
@@ -342,8 +370,8 @@ export function StudentDashboard() {
                                   </label>
                                 )}
 
-                                {/* Delete Proof Button */}
-                                {!isSubmitted && !isTaskClosed && (
+                                {/* Delete Proof Button (Allowed as long as task is not closed) */}
+                                {!isTaskClosed && (
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveProof(task.id, i)}
@@ -405,7 +433,9 @@ export function StudentDashboard() {
                         : 'bg-amber-400'
                     }`} />
                     {isSubmitted 
-                      ? 'Tugas ini telah Anda selesaikan.' 
+                      ? (!isTaskClosed
+                          ? 'Tugas telah disubmit. Anda dapat mengganti foto bukti atau membatalkan submit jika perlu.'
+                          : 'Tugas ini telah Anda selesaikan dan pengumpulan telah ditutup.')
                       : isTaskClosed 
                       ? 'Batas waktu pengumpulan telah berakhir.' 
                       : isAllUploaded 
@@ -414,18 +444,36 @@ export function StudentDashboard() {
                     }
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {/* View All Submitted Proofs button if already submitted */}
                     {isSubmitted ? (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <button
                           type="button"
                           onClick={() => setConfirmSubmitTask(task)}
-                          className="inline-flex items-center px-3.5 py-2 text-xs font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors"
+                          className="inline-flex items-center px-3.5 py-2 text-xs font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700 rounded-lg transition-colors cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
                           Cek Semua Bukti
                         </button>
+
+                        {!isTaskClosed && (
+                          <button
+                            type="button"
+                            onClick={() => handleUnsubmit(task.id)}
+                            disabled={unsubmittingId === task.id}
+                            className="inline-flex items-center px-3.5 py-2 text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg transition-colors cursor-pointer"
+                            title="Batalkan submit tugas ini untuk mengganti foto bukti"
+                          >
+                            {unsubmittingId === task.id ? (
+                              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin text-amber-400" />
+                            ) : (
+                              <RotateCcw className="w-3.5 h-3.5 mr-1.5 text-amber-400" />
+                            )}
+                            {unsubmittingId === task.id ? 'Membatalkan...' : 'Batalkan Submit'}
+                          </button>
+                        )}
+
                         <span className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
                           <Check className="w-3.5 h-3.5 mr-1" />
                           Terkirim
@@ -567,7 +615,11 @@ export function StudentDashboard() {
                   <CheckCircle className="w-5 h-5" />
                 </div>
                 <div>
-                  <h4 className="text-base font-semibold text-zinc-100">Periksa & Konfirmasi Pengumpulan</h4>
+                  <h4 className="text-base font-semibold text-zinc-100">
+                    {confirmSubmitTask.submission?.status === 'SUBMITTED' 
+                      ? 'Detail Bukti Pengumpulan Tugas' 
+                      : 'Periksa & Konfirmasi Pengumpulan'}
+                  </h4>
                   <p className="text-xs text-zinc-400 mt-0.5">{confirmSubmitTask.title}</p>
                 </div>
               </div>
@@ -583,7 +635,9 @@ export function StudentDashboard() {
             {/* Content: Gallery of all proof photos */}
             <div className="p-6 overflow-y-auto space-y-4">
               <p className="text-sm text-zinc-300">
-                Silakan cek kembali foto bukti yang telah Anda unggah sebelum dikirim ke Admin:
+                {confirmSubmitTask.submission?.status === 'SUBMITTED'
+                  ? 'Foto bukti yang telah Anda kirimkan untuk tugas ini:'
+                  : 'Silakan cek kembali foto bukti yang telah Anda unggah sebelum dikirim ke Admin:'}
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -627,34 +681,70 @@ export function StudentDashboard() {
                 })}
               </div>
 
-              <div className="p-3.5 bg-blue-950/30 border border-blue-900/40 rounded-xl flex items-start gap-2.5 text-xs text-blue-300">
-                <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                <span>Setelah menekan <strong>"Ya, Submit Sekarang"</strong>, tugas absensi Anda akan tercatat telah diselesaikan. Anda tetap dapat melihat bukti kapan pun.</span>
-              </div>
+              {confirmSubmitTask.submission?.status === 'SUBMITTED' ? (
+                <div className="p-3.5 bg-emerald-950/30 border border-emerald-900/40 rounded-xl flex items-start gap-2.5 text-xs text-emerald-300">
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <span>Tugas ini sudah berstatus <strong>Selesai Disubmit</strong>. Jika Anda ingin mengganti foto bukti, Anda dapat menekan tombol <strong>"Batalkan Submit"</strong> di bawah.</span>
+                </div>
+              ) : (
+                <div className="p-3.5 bg-blue-950/30 border border-blue-900/40 rounded-xl flex items-start gap-2.5 text-xs text-blue-300">
+                  <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                  <span>Setelah menekan <strong>"Ya, Submit Sekarang"</strong>, tugas absensi Anda akan tercatat telah diselesaikan. Anda tetap dapat membatalkan submit atau mengganti foto bukti sebelum batas waktu berakhir.</span>
+                </div>
+              )}
             </div>
 
             {/* Footer Buttons */}
             <div className="px-6 py-4 border-t border-zinc-800 bg-zinc-950/80 flex flex-col-reverse sm:flex-row justify-end gap-2.5">
-              <button 
-                type="button"
-                onClick={() => setConfirmSubmitTask(null)}
-                className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium transition-colors"
-              >
-                Cek Ulang / Batal
-              </button>
-              <button 
-                type="button"
-                onClick={() => handleFinalizeSubmit(confirmSubmitTask.id)}
-                disabled={finalizingId === confirmSubmitTask.id}
-                className="inline-flex items-center justify-center px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-blue-600/30 disabled:opacity-50"
-              >
-                {finalizingId === confirmSubmitTask.id ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : (
-                  <Send className="w-4 h-4 mr-2" />
-                )}
-                {finalizingId === confirmSubmitTask.id ? 'Mengirim...' : 'Ya, Submit Sekarang'}
-              </button>
+              {confirmSubmitTask.submission?.status === 'SUBMITTED' ? (
+                <>
+                  <button 
+                    type="button"
+                    onClick={() => setConfirmSubmitTask(null)}
+                    className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    Tutup
+                  </button>
+                  {!(confirmSubmitTask.isClosed || !confirmSubmitTask.isOpen || (confirmSubmitTask.deadline && new Date() > new Date(confirmSubmitTask.deadline))) && (
+                    <button 
+                      type="button"
+                      onClick={() => handleUnsubmit(confirmSubmitTask.id)}
+                      disabled={unsubmittingId === confirmSubmitTask.id}
+                      className="inline-flex items-center justify-center px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-sm font-semibold transition-colors cursor-pointer"
+                    >
+                      {unsubmittingId === confirmSubmitTask.id ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin text-amber-400" />
+                      ) : (
+                        <RotateCcw className="w-4 h-4 mr-2 text-amber-400" />
+                      )}
+                      {unsubmittingId === confirmSubmitTask.id ? 'Membatalkan...' : 'Batalkan Submit & Ganti Foto'}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button 
+                    type="button"
+                    onClick={() => setConfirmSubmitTask(null)}
+                    className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium transition-colors"
+                  >
+                    Cek Ulang / Batal
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => handleFinalizeSubmit(confirmSubmitTask.id)}
+                    disabled={finalizingId === confirmSubmitTask.id}
+                    className="inline-flex items-center justify-center px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-blue-600/30 disabled:opacity-50 cursor-pointer"
+                  >
+                    {finalizingId === confirmSubmitTask.id ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mr-2" />
+                    )}
+                    {finalizingId === confirmSubmitTask.id ? 'Mengirim...' : 'Ya, Submit Sekarang'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

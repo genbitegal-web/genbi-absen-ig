@@ -397,20 +397,26 @@ app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, asyn
     const report = students.map(student => {
       const submission = submissions.find(s => s.studentId === student.id);
       const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : (task.igPostUrl ? 1 : 1);
-      const hasUploaded = submission ? submission.proofUrls.filter(url => !!url).length >= totalLinks : false;
+      const uploadedCount = submission ? submission.proofUrls.filter(url => !!url).length : 0;
+      const isCompleted = submission ? (submission.status === 'SUBMITTED' || uploadedCount >= totalLinks) : false;
+      const isExplicitlySubmitted = submission ? submission.status === 'SUBMITTED' : false;
+
       return {
         id: student.id,
         npm: student.npm,
         name: student.name,
         campus: student.campus,
-        hasUploaded,
+        hasUploaded: isExplicitlySubmitted,
+        status: submission ? submission.status : 'UNSUBMITTED',
+        uploadedCount,
+        totalLinks,
         proofUrls: submission ? submission.proofUrls : [],
         submittedAt: submission ? submission.createdAt : null,
       };
     });
 
     res.json({ task, report });
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
@@ -426,11 +432,11 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
     const tasksWithStatus = tasks.map(t => {
       const submission = submissions.find(s => s.taskId === t.id);
       const totalLinks = t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls.length : (t.igPostUrl ? 1 : 1);
-      const hasUploaded = submission ? submission.proofUrls.filter(url => !!url).length >= totalLinks : false;
+      const isSubmitted = submission ? submission.status === 'SUBMITTED' : false;
       const isClosed = !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false);
       return {
         ...t,
-        hasUploaded,
+        hasUploaded: isSubmitted,
         isClosed,
         submission: submission || null,
       };
@@ -550,6 +556,35 @@ app.post('/api/student/tasks/:taskId/finalize', authMiddleware, async (req: any,
     res.json({ message: 'Tugas berhasil disubmit!', submission: updated });
   } catch (error: any) {
     console.error("Finalize Error:", error);
+    res.status(500).json({ error: error.message || "Unknown error" });
+  }
+});
+
+app.post('/api/student/tasks/:taskId/unsubmit', authMiddleware, async (req: any, res: any) => {
+  const taskId = parseInt(req.params.taskId);
+  const studentId = req.user.id;
+  try {
+    const task = await prisma.task.findUnique({ where: { id: taskId } });
+    if (!task) return res.status(404).json({ error: 'Tugas tidak ditemukan' });
+
+    const isClosed = !task.isOpen || (task.deadline ? new Date() > new Date(task.deadline) : false);
+    if (isClosed) {
+      return res.status(403).json({ error: 'Tidak dapat membatalkan submit karena batas waktu pengumpulan telah berakhir atau tugas ditutup.' });
+    }
+
+    const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
+    if (!submission) {
+      return res.status(404).json({ error: 'Data pengumpulan tidak ditemukan' });
+    }
+
+    const updated = await prisma.submission.update({
+      where: { id: submission.id },
+      data: { status: 'PENDING' }
+    });
+
+    res.json({ message: 'Pengumpulan tugas berhasil dibatalkan. Anda dapat mengganti foto bukti dan mengirimkan kembali.', submission: updated });
+  } catch (error: any) {
+    console.error("Unsubmit Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
