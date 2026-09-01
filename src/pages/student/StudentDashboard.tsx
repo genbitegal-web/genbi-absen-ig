@@ -135,7 +135,7 @@ export function StudentDashboard() {
       });
       const data = await res.json();
       if (res.ok) {
-        showToast(data.message || 'Tugas absensi berhasil dikirimkan!');
+        showToast(data.message || 'Tugas presensi berhasil dikirimkan!');
         setConfirmSubmitTask(null);
         await fetchData();
       } else {
@@ -194,7 +194,7 @@ export function StudentDashboard() {
       {/* Main Task List */}
       <div className="lg:col-span-2 space-y-6">
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-zinc-100">Daftar Tugas Absensi</h2>
+          <h2 className="text-2xl font-bold text-zinc-100">Daftar Tugas Presensi</h2>
           <span className="text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg">
             {tasks.filter(t => t.submission?.status === 'SUBMITTED').length} dari {tasks.length} Selesai
           </span>
@@ -202,7 +202,7 @@ export function StudentDashboard() {
 
         {tasks.length === 0 ? (
           <div className="bg-zinc-900 rounded-xl p-8 text-center text-zinc-500 border border-zinc-800">
-            Belum ada tugas absensi saat ini.
+            Belum ada tugas presensi saat ini.
           </div>
         ) : (
           tasks.map(task => {
@@ -689,7 +689,7 @@ export function StudentDashboard() {
               ) : (
                 <div className="p-3.5 bg-blue-950/30 border border-blue-900/40 rounded-xl flex items-start gap-2.5 text-xs text-blue-300">
                   <AlertCircle className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-                  <span>Setelah menekan <strong>"Ya, Submit Sekarang"</strong>, tugas absensi Anda akan tercatat telah diselesaikan. Anda tetap dapat membatalkan submit atau mengganti foto bukti sebelum batas waktu berakhir.</span>
+                  <span>Setelah menekan <strong>"Ya, Submit Sekarang"</strong>, tugas presensi Anda akan tercatat telah diselesaikan. Anda tetap dapat membatalkan submit atau mengganti foto bukti sebelum batas waktu berakhir.</span>
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 {
-  "name": "Sistem Absensi Tugas Mahasiswa",
-  "description": "Aplikasi absensi dan verifikasi tugas mahasiswa dengan upload bukti, batas waktu pengumpulan tugas, dan dashboard admin.",
+  "name": "Sistem Presensi Tugas Mahasiswa",
+  "description": "Aplikasi presensi dan verifikasi tugas mahasiswa dengan upload bukti, batas waktu pengumpulan tugas, dan dashboard admin.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

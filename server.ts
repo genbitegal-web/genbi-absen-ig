@@ -356,7 +356,7 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
       orderBy: { createdAt: 'desc' },
       include: {
         _count: {
-          select: { submissions: true }
+          select: { submissions: { where: { status: 'SUBMITTED' } } }
         }
       }
     });

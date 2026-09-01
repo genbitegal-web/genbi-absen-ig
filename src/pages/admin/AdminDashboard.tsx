@@ -171,7 +171,7 @@ function TasksTab({ token }: { token: string }) {
       const ws = XLSX.utils.aoa_to_sheet(wsData);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Rekap Semua Tugas");
-      XLSX.writeFile(wb, `Rekap_Tugas_Absensi.xlsx`);
+      XLSX.writeFile(wb, `Rekap_Tugas_Presensi.xlsx`);
       showNotification('Rekap semua tugas berhasil diunduh!');
     } catch (err) {
       showNotification('Gagal mengekspor rekap', true);
@@ -254,7 +254,7 @@ function TasksTab({ token }: { token: string }) {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-zinc-100">Daftar Tugas Absensi</h2>
+          <h2 className="text-xl font-semibold text-zinc-100">Daftar Tugas Presensi</h2>
           <p className="text-xs text-zinc-400 mt-0.5">Kelola batas waktu, buka/tutup pengumpulan, dan rekap hasil tugas mahasiswa</p>
         </div>
         <div className="flex gap-3">
@@ -638,7 +638,7 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
       <div className="flex justify-between items-center">
         <div className="flex items-center space-x-4">
           <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 font-medium">← Kembali</button>
-          <h2 className="text-xl font-semibold text-zinc-100">Laporan Absensi</h2>
+          <h2 className="text-xl font-semibold text-zinc-100">Laporan Presensi</h2>
         </div>
         <button 
           onClick={handleExport}
