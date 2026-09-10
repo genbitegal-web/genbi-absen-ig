@@ -46,7 +46,7 @@ export function Login() {
           </div>
           <h2 className="text-2xl font-bold text-zinc-100">Selamat Datang</h2>
           <p className="text-sm text-zinc-400 mt-2">
-            Silakan login untuk mengakses portal presensi Bank Indonesia Tegal.
+            Silakan login untuk mengakses portal presensi GenBI Tegal.
           </p>
         </div>
 
