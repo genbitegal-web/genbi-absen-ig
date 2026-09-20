@@ -10,10 +10,10 @@ import { PrismaClient } from '@prisma/client';
 import { createClient } from '@supabase/supabase-js';
 
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://postgres.wfjwukoounzliqpoiwry:keluargagenbitegal@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
+  process.env.DATABASE_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
 }
 if (!process.env.DIRECT_URL) {
-  process.env.DIRECT_URL = "postgresql://postgres.wfjwukoounzliqpoiwry:keluargagenbitegal@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
+  process.env.DIRECT_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
 }
 
 const app = express();
@@ -75,6 +75,12 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign({ id: user.id, npm: user.npm, role: user.role, name: user.name, campus: user.campus }, SECRET_KEY, { expiresIn: '1d' });
     res.json({ token, user: { id: user.id, npm: user.npm, name: user.name, role: user.role, campus: user.campus } });
   } catch (error: any) {
+    console.error("Login error:", error);
+    if (error.message?.includes('tenant/user') || error.message?.includes('P1001') || error.message?.includes('database')) {
+      return res.status(500).json({ 
+        error: 'Koneksi database terputus. Silakan masukkan DATABASE_URL Neon yang baru di pengaturan environment.' 
+      });
+    }
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
