@@ -53,3 +53,12 @@ model Notification {
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
 }
+
+model ProofFile {
+  id        Int      @id @default(autoincrement())
+  fileName  String   @unique
+  mimeType  String
+  data      Bytes
+  size      Int
+  createdAt DateTime @default(now())
+}

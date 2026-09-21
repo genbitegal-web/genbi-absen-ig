@@ -7,13 +7,63 @@ import fs from 'fs';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { createClient } from '@supabase/supabase-js';
+import { v2 as cloudinary } from 'cloudinary';
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
 }
 if (!process.env.DIRECT_URL) {
   process.env.DIRECT_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
+}
+
+// Setup Cloudinary Configuration
+if (process.env.CLOUDINARY_URL) {
+  cloudinary.config({
+    cloudinary_url: process.env.CLOUDINARY_URL,
+  });
+} else if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+}
+
+function isCloudinaryConfigured(): boolean {
+  return Boolean(
+    process.env.CLOUDINARY_URL || 
+    (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
+  );
+}
+
+// Extract Cloudinary public_id from secure_url (e.g. genbi_proofs/sample123)
+function getCloudinaryPublicId(url: string): string | null {
+  if (!url || !url.includes('cloudinary.com')) return null;
+  const match = url.match(/\/upload\/(?:v\d+\/)?([^\.]+)/);
+  return match ? match[1] : null;
+}
+
+// Upload buffer directly to Cloudinary using upload_stream
+async function uploadToCloudinary(buffer: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: 'genbi_proofs',
+        resource_type: 'auto',
+      },
+      (error, result) => {
+        if (error) {
+          return reject(error);
+        }
+        if (!result?.secure_url) {
+          return reject(new Error('Upload Cloudinary tidak menghasilkan secure_url'));
+        }
+        resolve(result.secure_url);
+      }
+    );
+    uploadStream.end(buffer);
+  });
 }
 
 const app = express();
@@ -27,12 +77,53 @@ const prisma = new PrismaClient({
     },
   },
 });
-const supabase = createClient(
-  process.env.SUPABASE_URL || 'https://wfjwukoounzliqpoiwry.supabase.co',
-  process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indmand1a29vdW56bGlxcG9pd3J5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0OTI4OTksImV4cCI6MjEwMjA2ODg5OX0.EYcs4DW9y0n6iUEQp-vdv27tWAf59R6ODwZSZQSDwkU'
-);
 
-// Setup Multer for memory uploads with generous size limits (Serverless-compatible)
+// Ensure uploads cache directory exists
+const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'proofs');
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+// Helper to remove stored file from Cloudinary, Neon Database, and local cache
+async function deleteStoredFile(urlOrFileName: string | null) {
+  if (!urlOrFileName) return;
+
+  // 1. Delete from Cloudinary if URL is from Cloudinary
+  if (urlOrFileName.includes('cloudinary.com')) {
+    const publicId = getCloudinaryPublicId(urlOrFileName);
+    if (publicId) {
+      try {
+        await cloudinary.uploader.destroy(publicId);
+      } catch (e) {
+        console.warn('Gagal menghapus file dari Cloudinary:', publicId, e);
+      }
+    }
+  }
+
+  const fileName = urlOrFileName.includes('/') ? urlOrFileName.split('/').pop() : urlOrFileName;
+  if (!fileName) return;
+
+  // 2. Delete from Neon Postgres database (if stored there)
+  try {
+    await prisma.proofFile.deleteMany({
+      where: { fileName }
+    });
+  } catch (e) {
+    console.warn('Gagal menghapus file dari database Neon:', fileName, e);
+  }
+
+  // 3. Delete from local disk cache
+  const localPath = path.join(UPLOAD_DIR, fileName);
+  if (fs.existsSync(localPath)) {
+    try {
+      fs.unlinkSync(localPath);
+    } catch (e) {
+      console.warn('Gagal menghapus cache lokal:', localPath, e);
+    }
+  }
+}
+
+// Setup Multer for memory uploads with generous size limits
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
@@ -43,6 +134,43 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Serve uploaded proofs from Neon PostgreSQL (with disk caching)
+app.get('/uploads/proofs/:fileName', async (req: any, res: any) => {
+  try {
+    const { fileName } = req.params;
+    const localPath = path.join(UPLOAD_DIR, fileName);
+
+    // If already in local cache, send directly
+    if (fs.existsSync(localPath)) {
+      return res.sendFile(localPath);
+    }
+
+    // Otherwise, stream from Neon Database
+    const file = await prisma.proofFile.findUnique({
+      where: { fileName }
+    });
+
+    if (!file) {
+      return res.status(404).send('File bukti tidak ditemukan di Neon Storage');
+    }
+
+    // Cache locally for faster subsequent access
+    try {
+      fs.writeFileSync(localPath, file.data);
+    } catch (cacheErr) {
+      console.warn('Failed to cache file to disk:', cacheErr);
+    }
+
+    res.setHeader('Content-Type', file.mimeType || 'image/jpeg');
+    res.setHeader('Content-Length', file.size || file.data.length);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return res.end(Buffer.from(file.data));
+  } catch (err: any) {
+    console.error('Error fetching file from Neon storage:', err);
+    return res.status(500).send('Gagal memuat file dari Neon Storage');
+  }
+});
 
 // Middlewares
 const authMiddleware = (req: any, res: any, next: any) => {
@@ -105,11 +233,8 @@ app.delete('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (r
     const submissions = await prisma.submission.findMany({ where: { taskId } });
     for (const sub of submissions) {
       if (Array.isArray(sub.proofUrls)) {
-        const fileNames = sub.proofUrls
-          .map(url => url ? url.split('/').pop() : null)
-          .filter((f): f is string => Boolean(f));
-        if (fileNames.length > 0) {
-          await supabase.storage.from('proofs').remove(fileNames);
+        for (const url of sub.proofUrls) {
+          await deleteStoredFile(url);
         }
       }
     }
@@ -133,11 +258,8 @@ app.delete('/api/admin/students/:studentId', authMiddleware, adminMiddleware, as
     const submissions = await prisma.submission.findMany({ where: { studentId } });
     for (const sub of submissions) {
       if (Array.isArray(sub.proofUrls)) {
-        const fileNames = sub.proofUrls
-          .map(url => url ? url.split('/').pop() : null)
-          .filter((f): f is string => Boolean(f));
-        if (fileNames.length > 0) {
-          await supabase.storage.from('proofs').remove(fileNames);
+        for (const url of sub.proofUrls) {
+          await deleteStoredFile(url);
         }
       }
     }
@@ -169,18 +291,12 @@ app.post('/api/admin/students/bulk-delete', authMiddleware, adminMiddleware, asy
     }
 
     const submissions = await prisma.submission.findMany({ where: { studentId: { in: validStudentIds } } });
-    const filesToDelete: string[] = [];
     for (const sub of submissions) {
       if (Array.isArray(sub.proofUrls)) {
         for (const url of sub.proofUrls) {
-          const fn = url ? url.split('/').pop() : null;
-          if (fn) filesToDelete.push(fn);
+          await deleteStoredFile(url);
         }
       }
-    }
-
-    if (filesToDelete.length > 0) {
-      await supabase.storage.from('proofs').remove(filesToDelete);
     }
 
     await prisma.submission.deleteMany({ where: { studentId: { in: validStudentIds } } });
@@ -481,28 +597,58 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       ? req.file.mimetype 
       : 'image/jpeg';
 
-    const { error: uploadError } = await supabase.storage
-      .from('proofs')
-      .upload(fileName, req.file.buffer, {
-        contentType,
-        upsert: false
-      });
+    let filePublicUrl = '';
 
-    if (uploadError) {
-      console.error("Supabase Storage Error:", uploadError);
-      return res.status(500).json({ error: uploadError.message || "Unknown error" });
+    // If Cloudinary credentials are provided, upload directly to Cloudinary
+    if (isCloudinaryConfigured()) {
+      try {
+        filePublicUrl = await uploadToCloudinary(req.file.buffer);
+      } catch (cloudErr: any) {
+        console.warn('Cloudinary upload failed, falling back to Neon database storage:', cloudErr?.message);
+      }
     }
 
-    const { data: publicUrlData } = supabase.storage
-      .from('proofs')
-      .getPublicUrl(fileName);
+    // Fallback or default to Neon database + disk cache
+    if (!filePublicUrl) {
+      // 1. Store proof permanently in Neon PostgreSQL database
+      await prisma.proofFile.upsert({
+        where: { fileName },
+        create: {
+          fileName,
+          mimeType: contentType,
+          data: req.file.buffer,
+          size: req.file.size || req.file.buffer.length
+        },
+        update: {
+          mimeType: contentType,
+          data: req.file.buffer,
+          size: req.file.size || req.file.buffer.length
+        }
+      });
+
+      // 2. Also write to local cache for fast disk delivery
+      try {
+        const filePath = path.join(UPLOAD_DIR, fileName);
+        fs.writeFileSync(filePath, req.file.buffer);
+      } catch (cacheErr) {
+        console.warn('Failed to write local disk cache:', cacheErr);
+      }
+
+      filePublicUrl = `/uploads/proofs/${fileName}`;
+    }
 
     let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
 
     if (submission) {
+      // If previous proof existed at this index, clean it up
+      const oldUrl = submission.proofUrls[linkIndex];
+      if (oldUrl && oldUrl !== filePublicUrl) {
+        await deleteStoredFile(oldUrl);
+      }
+
       const newProofUrls = [...submission.proofUrls];
       while (newProofUrls.length < totalLinks) newProofUrls.push("");
-      newProofUrls[linkIndex] = publicUrlData.publicUrl;
+      newProofUrls[linkIndex] = filePublicUrl;
       submission = await prisma.submission.update({
         where: { id: submission.id },
         data: { 
@@ -512,7 +658,7 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       });
     } else {
       const initialProofUrls = new Array(totalLinks).fill("");
-      initialProofUrls[linkIndex] = publicUrlData.publicUrl;
+      initialProofUrls[linkIndex] = filePublicUrl;
       submission = await prisma.submission.create({
         data: {
           taskId,
@@ -615,7 +761,9 @@ app.post('/api/student/tasks/:taskId/remove-proof', authMiddleware, async (req: 
 
     const newProofUrls = [...submission.proofUrls];
     if (newProofUrls[linkIndex]) {
+      const oldUrl = newProofUrls[linkIndex];
       newProofUrls[linkIndex] = "";
+      await deleteStoredFile(oldUrl);
     }
 
     const updated = await prisma.submission.update({

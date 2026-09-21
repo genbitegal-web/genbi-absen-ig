@@ -18,7 +18,9 @@ import {
   Unlock, 
   Calendar, 
   AlertCircle,
-  X
+  X,
+  ExternalLink,
+  ImageIcon
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -564,6 +566,7 @@ function TasksTab({ token }: { token: string }) {
 function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, onBack: () => void }) {
   const [report, setReport] = useState<ReportItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; studentName: string; npm: string; linkNumber: number } | null>(null);
 
   useEffect(() => {
     fetch(`/api/admin/tasks/${taskId}/report`, { headers: { Authorization: `Bearer ${token}` } })
@@ -721,15 +724,20 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
                     {item.proofUrls && item.proofUrls.length > 0 && item.proofUrls.some(u => !!u) ? (
                       <div className="flex flex-wrap gap-1.5">
                         {item.proofUrls.map((url, idx) => url ? (
-                          <a 
+                          <button 
                             key={idx} 
-                            href={url} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="inline-flex items-center px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded hover:bg-blue-500/20 text-xs transition-colors"
+                            type="button"
+                            onClick={() => setPreviewPhoto({
+                              url,
+                              studentName: item.name,
+                              npm: item.npm,
+                              linkNumber: idx + 1
+                            })}
+                            className="inline-flex items-center px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded hover:bg-blue-500/20 text-xs font-medium transition-colors"
                           >
+                            <ImageIcon className="w-3 h-3 mr-1" />
                             Bukti #{idx + 1}
-                          </a>
+                          </button>
                         ) : null)}
                       </div>
                     ) : '-'}
@@ -740,6 +748,68 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
           </table>
         </div>
       </div>
+
+      {/* Photo Preview Lightbox Modal for Admin */}
+      {previewPhoto && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+          onClick={() => setPreviewPhoto(null)}
+        >
+          <div 
+            className="bg-zinc-900 border border-zinc-700 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/80">
+              <div>
+                <h4 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+                  <ImageIcon className="w-4 h-4 text-blue-400" />
+                  Foto Bukti #{previewPhoto.linkNumber}
+                </h4>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {previewPhoto.studentName} ({previewPhoto.npm})
+                </p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Viewer */}
+            <div className="p-4 bg-black/90 flex-1 overflow-auto flex items-center justify-center min-h-[300px]">
+              <img 
+                src={previewPhoto.url} 
+                alt="Foto Bukti Mahasiswa" 
+                className="max-h-[60vh] max-w-full object-contain rounded-lg border border-zinc-800"
+              />
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3 border-t border-zinc-800 bg-zinc-950/80 flex justify-between items-center">
+              <a 
+                href={previewPhoto.url} 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                className="inline-flex items-center text-xs text-blue-400 hover:underline font-medium"
+              >
+                <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                Buka Resolusi Penuh
+              </a>
+              <button 
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                className="px-4 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded-lg transition-colors border border-zinc-700"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
