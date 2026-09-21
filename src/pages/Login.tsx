@@ -23,9 +23,23 @@ export function Login() {
         body: JSON.stringify({ npm, password }),
       });
 
-      const data = await res.json();
+      let data: any = null;
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(
+            res.status === 500
+              ? 'Gagal terhubung ke database atau server Vercel. Pastikan Environment Variables DATABASE_URL telah disimpan dan dideploy di Vercel.'
+              : text || `Terjadi kesalahan pada server (${res.status})`
+          );
+        }
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || 'Login gagal');
+        throw new Error(data?.error || 'Login gagal');
       }
 
       login(data.token, data.user);

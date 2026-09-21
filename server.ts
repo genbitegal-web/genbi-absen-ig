@@ -4,6 +4,7 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
@@ -78,10 +79,17 @@ const prisma = new PrismaClient({
   },
 });
 
-// Ensure uploads cache directory exists
-const UPLOAD_DIR = path.join(process.cwd(), 'uploads', 'proofs');
-if (!fs.existsSync(UPLOAD_DIR)) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Ensure uploads cache directory exists (uses /tmp on Vercel serverless)
+const UPLOAD_DIR = process.env.VERCEL
+  ? path.join(os.tmpdir(), 'uploads', 'proofs')
+  : path.join(process.cwd(), 'uploads', 'proofs');
+
+try {
+  if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  }
+} catch (e) {
+  console.warn('Upload directory initialization notice:', e);
 }
 
 // Helper to remove stored file from Cloudinary, Neon Database, and local cache
@@ -134,6 +142,14 @@ const upload = multer({
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Normalize URL for Vercel serverless rewrites (ensures /api prefix is present)
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/api') && !req.url.startsWith('/uploads')) {
+    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+  }
+  next();
+});
 
 // Serve uploaded proofs from Neon PostgreSQL (with disk caching)
 app.get('/uploads/proofs/:fileName', async (req: any, res: any) => {
