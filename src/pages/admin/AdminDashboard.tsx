@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Task, User, ReportItem } from '../../types';
+import { Task, User, ReportItem, TaskPlatform } from '../../types';
 import { 
   Users, 
   FileSpreadsheet, 
@@ -20,9 +20,20 @@ import {
   AlertCircle,
   X,
   ExternalLink,
-  ImageIcon
+  ImageIcon,
+  Youtube,
+  Instagram,
+  Play,
+  Video
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { 
+  isYouTubeUrl, 
+  isInstagramUrl, 
+  getYouTubeThumbnail, 
+  detectPlatform, 
+  getLinkActionLabel 
+} from '../../utils/platformHelper';
 
 export function AdminDashboard() {
   const { token } = useAuth();
@@ -66,6 +77,14 @@ function TasksTab({ token }: { token: string }) {
   const [togglingTaskId, setTogglingTaskId] = useState<number | null>(null);
   const [isExporting, setIsExporting] = useState(false);
   
+  // Platform filter
+  const [platformFilter, setPlatformFilter] = useState<'ALL' | 'YOUTUBE' | 'INSTAGRAM'>('ALL');
+
+  // Form creation state
+  const [createPlatform, setCreatePlatform] = useState<TaskPlatform>('INSTAGRAM');
+  const [titleInput, setTitleInput] = useState('');
+  const [descInput, setDescInput] = useState('');
+
   // Modal for editing deadline
   const [editingTaskDeadline, setEditingTaskDeadline] = useState<Task | null>(null);
   const [isSavingDeadline, setIsSavingDeadline] = useState(false);
@@ -96,6 +115,31 @@ function TasksTab({ token }: { token: string }) {
       console.error(e);
       setTasks([]);
     }
+  };
+
+  const applyPreset = (type: 'YOUTUBE' | 'INSTAGRAM') => {
+    setCreatePlatform(type);
+    if (type === 'YOUTUBE') {
+      setTitleInput('Presensi Video YouTube: ');
+      setDescInput('1. Buka tautan video YouTube di bawah ini.\n2. Tonton video secara penuh atau minimal 3 menit.\n3. Berikan Like & Subscribe ke channel YouTube.\n4. Tinggalkan komentar positif & relevan dengan format: [Nama - NPM - Kampus].\n5. Unggah screenshot bukti Like dan Komentar Anda.');
+      if (taskUrls.length === 1 && (!taskUrls[0] || isInstagramUrl(taskUrls[0]))) {
+        setTaskUrls(['https://www.youtube.com/watch?v=']);
+      }
+    } else {
+      setTitleInput('Presensi Postingan Instagram: ');
+      setDescInput('1. Buka postingan Instagram melalui tautan di bawah.\n2. Berikan Like dan tinggalkan komentar relevan.\n3. Repost postingan ke Story Instagram pribadi Anda.\n4. Unggah screenshot bukti Like, Komen, dan Repost.');
+      if (taskUrls.length === 1 && (!taskUrls[0] || isYouTubeUrl(taskUrls[0]))) {
+        setTaskUrls(['https://www.instagram.com/p/']);
+      }
+    }
+  };
+
+  const handleCloseCreate = () => {
+    setShowCreate(false);
+    setTitleInput('');
+    setDescInput('');
+    setTaskUrls(['']);
+    setCreatePlatform('INSTAGRAM');
   };
 
   const handleToggleTask = async (taskId: number) => {
@@ -152,7 +196,11 @@ function TasksTab({ token }: { token: string }) {
       
       const wsData: any[][] = [];
       const headers = ['NPM', 'Nama', 'Kampus'];
-      tasks.forEach((t: any) => headers.push(t.title));
+      tasks.forEach((t: any) => {
+        const p = t.platform || detectPlatform(t.igPostUrls);
+        const prefix = p === 'YOUTUBE' ? '[YouTube] ' : p === 'INSTAGRAM' ? '[Instagram] ' : '[Campuran] ';
+        headers.push(`${prefix}${t.title}`);
+      });
       wsData.push(headers);
       
       students.forEach((student: any) => {
@@ -190,8 +238,9 @@ function TasksTab({ token }: { token: string }) {
     const deadlineVal = formData.get('deadline') as string;
 
     const payload = {
-      title: formData.get('title'),
-      description: formData.get('description'),
+      title: titleInput || formData.get('title'),
+      description: descInput || formData.get('description'),
+      platform: createPlatform,
       igPostUrls: validUrls,
       deadline: deadlineVal ? new Date(deadlineVal).toISOString() : null,
       isOpen: true
@@ -203,8 +252,7 @@ function TasksTab({ token }: { token: string }) {
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error('Gagal membuat tugas');
-      setShowCreate(false);
-      setTaskUrls(['']);
+      handleCloseCreate();
       showNotification('Tugas baru berhasil dibuat & diumumkan!');
       fetchTasks();
     } catch (err) {
@@ -218,6 +266,15 @@ function TasksTab({ token }: { token: string }) {
     const newUrls = [...taskUrls];
     newUrls[index] = value;
     setTaskUrls(newUrls);
+
+    // Auto switch platform if user pastes YouTube or Instagram link
+    if (index === 0 && newUrls.length === 1) {
+      if (isYouTubeUrl(value) && createPlatform !== 'YOUTUBE') {
+        setCreatePlatform('YOUTUBE');
+      } else if (isInstagramUrl(value) && createPlatform !== 'INSTAGRAM') {
+        setCreatePlatform('INSTAGRAM');
+      }
+    }
   };
 
   const addUrlField = () => {
@@ -251,6 +308,12 @@ function TasksTab({ token }: { token: string }) {
   };
 
   if (reportTask) return <TaskReport taskId={reportTask} token={token} onBack={() => setReportTask(null)} />;
+
+  const filteredTasks = tasks.filter(task => {
+    const p = task.platform || detectPlatform(task.igPostUrls);
+    if (platformFilter === 'ALL') return true;
+    return p === platformFilter;
+  });
 
   return (
     <div className="space-y-6">
@@ -294,18 +357,112 @@ function TasksTab({ token }: { token: string }) {
 
       {showCreate && (
         <div className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-xl animate-fade-in">
-          <h3 className="text-lg font-semibold text-zinc-100 mb-4 flex items-center gap-2">
-            <Plus className="w-5 h-5 text-blue-400" />
-            Buat Tugas Baru
-          </h3>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-zinc-100 flex items-center gap-2">
+              <Plus className="w-5 h-5 text-blue-400" />
+              Buat Tugas Presensi Baru
+            </h3>
+            <button
+              type="button"
+              onClick={handleCloseCreate}
+              className="p-1 text-zinc-400 hover:text-white rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Quick Platform Template Selector */}
+          <div className="mb-5 p-4 bg-zinc-950/70 rounded-xl border border-zinc-800">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
+              Pilih Kategori Platform / Gunakan Format Cepat:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <button
+                type="button"
+                onClick={() => applyPreset('INSTAGRAM')}
+                className={`p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${
+                  createPlatform === 'INSTAGRAM'
+                    ? 'bg-pink-950/40 text-pink-200 border-pink-500/50 shadow-md shadow-pink-950/50'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <div className="p-2 bg-pink-500/10 rounded-lg text-pink-400 shrink-0">
+                  <Instagram className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-zinc-200">Instagram</div>
+                  <div className="text-xs text-zinc-400">Postingan / Reels</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => applyPreset('YOUTUBE')}
+                className={`p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${
+                  createPlatform === 'YOUTUBE'
+                    ? 'bg-red-950/40 text-red-200 border-red-500/50 shadow-md shadow-red-950/50'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <div className="p-2 bg-red-500/10 rounded-lg text-red-500 shrink-0">
+                  <Youtube className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-zinc-200">YouTube Video</div>
+                  <div className="text-xs text-zinc-400">Video / Shorts</div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCreatePlatform('MIXED');
+                  if (!titleInput) setTitleInput('Presensi Konten Media Sosial');
+                }}
+                className={`p-3 rounded-xl border text-left transition-all flex items-center gap-3 ${
+                  createPlatform === 'MIXED'
+                    ? 'bg-purple-950/40 text-purple-200 border-purple-500/50 shadow-md shadow-purple-950/50'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400 shrink-0">
+                  <Video className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-zinc-200">Campuran</div>
+                  <div className="text-xs text-zinc-400">YouTube & IG</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <form onSubmit={handleCreate} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-zinc-300 mb-1">Judul Tugas</label>
-              <input name="title" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Misal: Like, Komen & Repost Postingan Instagram" />
+              <input 
+                name="title" 
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                required 
+                className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
+                placeholder={
+                  createPlatform === 'YOUTUBE' 
+                    ? "Misal: Tonton, Like & Komen Video YouTube Sosialisasi BI" 
+                    : "Misal: Like, Komen & Repost Postingan Instagram"
+                } 
+              />
             </div>
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">Deskripsi</label>
-              <textarea name="description" required className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" rows={3} placeholder="Instruksi detail mengenai tugas..."></textarea>
+              <label className="block text-sm font-medium text-zinc-300 mb-1">Deskripsi & Instruksi Mahasiswa</label>
+              <textarea 
+                name="description" 
+                value={descInput}
+                onChange={(e) => setDescInput(e.target.value)}
+                required 
+                className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-xs leading-relaxed" 
+                rows={4} 
+                placeholder="Instruksi detail mengenai tugas..."
+              ></textarea>
             </div>
 
             {/* Set Deadline (Optional) */}
@@ -325,117 +482,313 @@ function TasksTab({ token }: { token: string }) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-zinc-300 mb-1">URL / Link Tugas (Bisa Lebih Dari Satu)</label>
-              <div className="space-y-2">
-                {taskUrls.map((url, index) => (
-                  <div key={index} className="flex gap-2">
-                    <input 
-                      type="url" 
-                      value={url}
-                      onChange={(e) => handleUrlChange(index, e.target.value)}
-                      required={index === 0}
-                      className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" 
-                      placeholder="https://instagram.com/..." 
-                    />
-                    {taskUrls.length > 1 && (
-                      <button 
-                        type="button" 
-                        onClick={() => removeUrlField(index)}
-                        className="px-3 py-2 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg transition-colors border border-red-900/50"
-                      >
-                        <XCircle className="w-5 h-5" />
-                      </button>
-                    )}
-                  </div>
-                ))}
+              <label className="block text-sm font-medium text-zinc-300 mb-1">
+                Tautan / URL Video atau Postingan (Bisa Lebih Dari Satu)
+              </label>
+              <div className="space-y-3">
+                {taskUrls.map((url, index) => {
+                  const isYT = isYouTubeUrl(url);
+                  const isIG = isInstagramUrl(url);
+                  const ytThumb = getYouTubeThumbnail(url);
+
+                  return (
+                    <div key={index} className="p-3 bg-zinc-950/60 rounded-xl border border-zinc-800 space-y-2">
+                      <div className="flex gap-2">
+                        <input 
+                          type="url" 
+                          value={url}
+                          onChange={(e) => handleUrlChange(index, e.target.value)}
+                          required={index === 0}
+                          className="w-full px-4 py-2 bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" 
+                          placeholder={
+                            createPlatform === 'YOUTUBE' 
+                              ? "https://www.youtube.com/watch?v=... atau https://youtu.be/..." 
+                              : "https://instagram.com/p/..."
+                          } 
+                        />
+                        {taskUrls.length > 1 && (
+                          <button 
+                            type="button" 
+                            onClick={() => removeUrlField(index)}
+                            className="px-3 py-2 bg-red-900/30 text-red-400 hover:bg-red-900/50 rounded-lg transition-colors border border-red-900/50 shrink-0"
+                            title="Hapus URL"
+                          >
+                            <XCircle className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Realtime Detection Banner & Thumbnail Preview */}
+                      {isYT && (
+                        <div className="flex items-center justify-between gap-3 p-2 bg-red-950/30 border border-red-900/40 rounded-lg text-xs text-red-300">
+                          <div className="flex items-center gap-2">
+                            <Youtube className="w-4 h-4 text-red-500 shrink-0" />
+                            <span className="font-semibold">Video YouTube Terdeteksi</span>
+                          </div>
+                          {ytThumb && (
+                            <div className="flex items-center gap-2">
+                              <img 
+                                src={ytThumb} 
+                                alt="Thumbnail Preview" 
+                                className="w-12 h-7 object-cover rounded border border-zinc-700" 
+                              />
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center px-2 py-0.5 bg-red-500/20 text-red-300 hover:bg-red-500/30 rounded text-xs transition-colors"
+                              >
+                                <ExternalLink className="w-3 h-3 mr-1" />
+                                Cek Video
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {isIG && (
+                        <div className="flex items-center gap-2 p-2 bg-pink-950/30 border border-pink-900/40 rounded-lg text-xs text-pink-300">
+                          <Instagram className="w-4 h-4 text-pink-400 shrink-0" />
+                          <span className="font-semibold">Postingan Instagram Terdeteksi</span>
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center ml-auto px-2 py-0.5 bg-pink-500/20 text-pink-300 hover:bg-pink-500/30 rounded text-xs transition-colors"
+                          >
+                            <ExternalLink className="w-3 h-3 mr-1" />
+                            Cek Link
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 <button 
                   type="button" 
                   onClick={addUrlField}
-                  className="inline-flex items-center text-sm text-blue-400 hover:text-blue-300 mt-2 font-medium"
+                  className="inline-flex items-center text-xs text-blue-400 hover:text-blue-300 mt-2 font-medium"
                 >
                   <Plus className="w-4 h-4 mr-1" />
-                  Tambah URL Lainnya
+                  Tambah Tautan / Video Lainnya
                 </button>
               </div>
             </div>
-            <div className="flex justify-end space-x-3 pt-2">
-              <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium">Batal</button>
-              <button type="submit" disabled={isCreating} className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium disabled:opacity-50">
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-zinc-800">
+              <button 
+                type="button" 
+                onClick={handleCloseCreate} 
+                className="px-4 py-2 text-zinc-300 bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 rounded-lg text-sm font-medium"
+              >
+                Batal
+              </button>
+              <button 
+                type="submit" 
+                disabled={isCreating} 
+                className="inline-flex items-center px-4 py-2 text-white bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium disabled:opacity-50 shadow-md"
+              >
                 {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {isCreating ? 'Menyimpan...' : 'Simpan & Umumkan'}
+                {isCreating ? 'Menyimpan...' : 'Simpan & Umumkan Tugas'}
               </button>
             </div>
           </form>
         </div>
       )}
 
+      {/* Platform Filter Bar */}
+      <div className="flex items-center justify-between gap-4 border-b border-zinc-800/80 pb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-zinc-400 font-medium mr-1">Filter Kategori:</span>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'ALL'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            Semua ({tasks.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('YOUTUBE')}
+            className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'YOUTUBE'
+                ? 'bg-red-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            <Youtube className="w-3.5 h-3.5 mr-1.5 text-red-500" />
+            YouTube ({tasks.filter(t => (t.platform || detectPlatform(t.igPostUrls)) === 'YOUTUBE').length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('INSTAGRAM')}
+            className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'INSTAGRAM'
+                ? 'bg-pink-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            <Instagram className="w-3.5 h-3.5 mr-1.5 text-pink-400" />
+            Instagram ({tasks.filter(t => (t.platform || detectPlatform(t.igPostUrls)) === 'INSTAGRAM').length})
+          </button>
+        </div>
+
+        <div className="text-xs text-zinc-500">
+          Menampilkan {filteredTasks.length} dari {tasks.length} tugas
+        </div>
+      </div>
+
       {/* Task Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {tasks.map(task => {
-          const now = new Date();
-          const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
-          const isClosed = !task.isOpen || isPassedDeadline;
+      {filteredTasks.length === 0 ? (
+        <div className="bg-zinc-900 rounded-xl p-8 text-center text-zinc-500 border border-zinc-800">
+          Tidak ada tugas dalam kategori ini.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredTasks.map(task => {
+            const now = new Date();
+            const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
+            const isClosed = !task.isOpen || isPassedDeadline;
+            const taskPlatform = task.platform || detectPlatform(task.igPostUrls);
+            const urls = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls : (task.igPostUrl ? [task.igPostUrl] : []);
+            const firstYtUrl = urls.find(isYouTubeUrl);
+            const ytThumb = firstYtUrl ? getYouTubeThumbnail(firstYtUrl) : null;
 
-          return (
-            <div key={task.id} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm flex flex-col justify-between transition-all hover:border-zinc-700">
-              <div>
-                {/* Header with Status Badge */}
-                <div className="flex justify-between items-start gap-2 mb-2">
-                  <h3 className="font-semibold text-lg text-zinc-100 line-clamp-1">{task.title}</h3>
-                  {isClosed ? (
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
-                      !task.isOpen 
-                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
-                        : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                    }`}>
-                      <Lock className="w-3 h-3 mr-1" />
-                      {!task.isOpen ? 'Ditutup Manual' : 'Ditutup (Waktu Habis)'}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
-                      <Unlock className="w-3 h-3 mr-1" />
-                      Terbuka
-                    </span>
+            return (
+              <div key={task.id} className="bg-zinc-900 p-6 rounded-xl border border-zinc-800 shadow-sm flex flex-col justify-between transition-all hover:border-zinc-700">
+                <div>
+                  {/* Category & Status Badges */}
+                  <div className="flex justify-between items-start gap-2 mb-3">
+                    {taskPlatform === 'YOUTUBE' ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                        <Youtube className="w-3.5 h-3.5 mr-1 text-red-500" />
+                        YouTube
+                      </span>
+                    ) : taskPlatform === 'INSTAGRAM' ? (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                        <Instagram className="w-3.5 h-3.5 mr-1 text-pink-400" />
+                        Instagram
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                        <Video className="w-3.5 h-3.5 mr-1 text-purple-400" />
+                        Campuran
+                      </span>
+                    )}
+
+                    {isClosed ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold shrink-0 ${
+                        !task.isOpen 
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
+                          : 'bg-red-500/10 text-red-400 border border-red-500/20'
+                      }`}>
+                        <Lock className="w-3 h-3 mr-1" />
+                        {!task.isOpen ? 'Ditutup Manual' : 'Waktu Habis'}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                        <Unlock className="w-3 h-3 mr-1" />
+                        Terbuka
+                      </span>
+                    )}
+                  </div>
+
+                  {/* YouTube Thumbnail Preview Card */}
+                  {ytThumb && (
+                    <a
+                      href={firstYtUrl!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block relative mb-3 rounded-lg overflow-hidden border border-zinc-800 bg-black aspect-video max-h-36 group cursor-pointer"
+                      title="Klik untuk membuka video YouTube"
+                    >
+                      <img 
+                        src={ytThumb} 
+                        alt="Thumbnail Video YouTube" 
+                        className="w-full h-full object-cover opacity-85 group-hover:opacity-100 transition-opacity" 
+                      />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/10 transition-colors">
+                        <div className="w-9 h-9 rounded-full bg-red-600 flex items-center justify-center text-white shadow-lg group-hover:scale-110 transition-transform">
+                          <Play className="w-4 h-4 fill-white ml-0.5" />
+                        </div>
+                      </div>
+                      <div className="absolute bottom-1 right-1 px-1.5 py-0.5 bg-black/80 rounded text-[10px] text-zinc-300 flex items-center gap-1">
+                        <Youtube className="w-3 h-3 text-red-500" />
+                        YouTube
+                      </div>
+                    </a>
                   )}
-                </div>
 
-                <p className="text-zinc-400 text-sm mb-4 line-clamp-2">{task.description}</p>
+                  <h3 className="font-semibold text-lg text-zinc-100 line-clamp-1 mb-1">{task.title}</h3>
+                  <p className="text-zinc-400 text-sm mb-4 line-clamp-2">{task.description}</p>
 
-                {/* Deadline & Submissions Info */}
-                <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800/80 mb-4 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between text-zinc-400">
-                    <span className="flex items-center gap-1.5 text-zinc-300">
-                      <Clock className="w-3.5 h-3.5 text-blue-400" />
-                      Batas Waktu:
-                    </span>
-                    <span className={task.deadline && isPassedDeadline ? 'text-red-400 font-medium' : 'text-zinc-300'}>
-                      {task.deadline 
-                        ? new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) + ' WIB'
-                        : 'Tanpa Batas'}
-                    </span>
-                  </div>
+                  {/* Links Quick List */}
+                  {urls.length > 0 && (
+                    <div className="mb-4 space-y-1.5">
+                      {urls.map((url, idx) => {
+                        const isYT = isYouTubeUrl(url);
+                        return (
+                          <a
+                            key={idx}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                              isYT 
+                                ? 'bg-red-950/20 border-red-900/30 text-red-300 hover:bg-red-950/40' 
+                                : 'bg-zinc-950/60 border-zinc-800 text-zinc-300 hover:text-blue-400'
+                            }`}
+                          >
+                            <span className="flex items-center gap-1.5 truncate">
+                              {isYT ? <Youtube className="w-3.5 h-3.5 text-red-500 shrink-0" /> : <Instagram className="w-3.5 h-3.5 text-pink-400 shrink-0" />}
+                              <span className="truncate">{isYT ? `Video YouTube #${idx + 1}` : `Postingan Instagram #${idx + 1}`}</span>
+                            </span>
+                            <ExternalLink className="w-3 h-3 text-zinc-500 shrink-0 ml-1" />
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
 
-                  <div className="flex items-center justify-between text-zinc-400 pt-1 border-t border-zinc-800/50">
-                    <span>Pengumpulan:</span>
-                    <span className="font-medium text-blue-400">{task._count?.submissions || 0} Mahasiswa</span>
-                  </div>
-                </div>
-              </div>
+                  {/* Deadline & Submissions Info */}
+                  <div className="bg-zinc-950/60 p-3 rounded-lg border border-zinc-800/80 mb-4 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between text-zinc-400">
+                      <span className="flex items-center gap-1.5 text-zinc-300">
+                        <Clock className="w-3.5 h-3.5 text-blue-400" />
+                        Batas Waktu:
+                      </span>
+                      <span className={task.deadline && isPassedDeadline ? 'text-red-400 font-medium' : 'text-zinc-300'}>
+                        {task.deadline 
+                          ? new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }) + ' WIB'
+                          : 'Tanpa Batas'}
+                      </span>
+                    </div>
 
-              {/* Action Buttons */}
-              <div>
-                {confirmDeleteTask === task.id ? (
-                  <div className="flex flex-col space-y-2">
-                    <p className="text-xs text-red-400 font-medium text-center">Yakin ingin menghapus tugas ini?</p>
-                    <div className="flex space-x-2">
-                      <button onClick={() => handleDeleteTask(task.id)} disabled={deletingTaskId === task.id} className="flex-1 flex justify-center items-center py-2 bg-red-600 text-white hover:bg-red-500 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">
-                        {deletingTaskId === task.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
-                        Hapus
-                      </button>
-                      <button onClick={() => setConfirmDeleteTask(null)} disabled={deletingTaskId === task.id} className="flex-1 py-2 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">Batal</button>
+                    <div className="flex items-center justify-between text-zinc-400 pt-1 border-t border-zinc-800/50">
+                      <span>Pengumpulan:</span>
+                      <span className="font-medium text-blue-400">{task._count?.submissions || 0} Mahasiswa</span>
                     </div>
                   </div>
-                ) : (
+                </div>
+
+                {/* Action Buttons */}
+                <div>
+                  {confirmDeleteTask === task.id ? (
+                    <div className="flex flex-col space-y-2">
+                      <p className="text-xs text-red-400 font-medium text-center">Yakin ingin menghapus tugas ini?</p>
+                      <div className="flex space-x-2">
+                        <button onClick={() => handleDeleteTask(task.id)} disabled={deletingTaskId === task.id} className="flex-1 flex justify-center items-center py-2 bg-red-600 text-white hover:bg-red-500 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">
+                          {deletingTaskId === task.id ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                          Hapus
+                        </button>
+                        <button onClick={() => setConfirmDeleteTask(null)} disabled={deletingTaskId === task.id} className="flex-1 py-2 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 border border-zinc-700 rounded-lg font-medium text-xs transition-colors disabled:opacity-50">Batal</button>
+                      </div>
+                    </div>
+                  ) : (
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       {/* Toggle Open/Close Button */}
@@ -492,6 +845,7 @@ function TasksTab({ token }: { token: string }) {
           );
         })}
       </div>
+    )}
 
       {/* MODAL: Edit Task Deadline */}
       {editingTaskDeadline && (
@@ -565,6 +919,7 @@ function TasksTab({ token }: { token: string }) {
 
 function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, onBack: () => void }) {
   const [report, setReport] = useState<ReportItem[]>([]);
+  const [taskDetail, setTaskDetail] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; studentName: string; npm: string; linkNumber: number } | null>(null);
 
@@ -572,6 +927,7 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
     fetch(`/api/admin/tasks/${taskId}/report`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(data => {
+        setTaskDetail(data.task || null);
         setReport(Array.isArray(data.report) ? data.report : []);
         setLoading(false);
       })
@@ -617,6 +973,7 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
   }, [report]);
 
   const handleExport = () => {
+    const p = taskDetail ? (taskDetail.platform || detectPlatform(taskDetail.igPostUrls)) : 'TUGAS';
     const wsData = [
       ["NPM", "Nama", "Kampus", "Status", "Waktu Pengumpulan"],
       ...sortedReport.map(r => [
@@ -631,21 +988,73 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Laporan");
-    XLSX.writeFile(wb, `laporan_tugas_${taskId}.xlsx`);
+    const cleanTitle = (taskDetail?.title || `tugas_${taskId}`).replace(/[^a-zA-Z0-9_-]/g, '_');
+    XLSX.writeFile(wb, `Laporan_${p}_${cleanTitle}.xlsx`);
   };
 
-  if (loading) return <div className="p-8 text-center">Memuat laporan...</div>;
+  if (loading) return <div className="p-8 text-center text-zinc-400">Memuat laporan presensi...</div>;
+
+  const currentPlatform = taskDetail ? (taskDetail.platform || detectPlatform(taskDetail.igPostUrls)) : 'INSTAGRAM';
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div className="flex items-center space-x-4">
-          <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 font-medium">← Kembali</button>
-          <h2 className="text-xl font-semibold text-zinc-100">Laporan Presensi</h2>
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 bg-zinc-900 p-5 rounded-xl border border-zinc-800">
+        <div className="flex items-start sm:items-center space-x-3">
+          <button 
+            onClick={onBack} 
+            className="text-zinc-400 hover:text-zinc-200 font-medium text-xs bg-zinc-800 hover:bg-zinc-700 px-3 py-2 rounded-lg border border-zinc-700 transition-colors shrink-0"
+          >
+            ← Kembali
+          </button>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl font-bold text-zinc-100">{taskDetail?.title || 'Laporan Presensi'}</h2>
+              {currentPlatform === 'YOUTUBE' ? (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                  <Youtube className="w-3.5 h-3.5 mr-1 text-red-500" />
+                  YouTube
+                </span>
+              ) : currentPlatform === 'INSTAGRAM' ? (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                  <Instagram className="w-3.5 h-3.5 mr-1 text-pink-400" />
+                  Instagram
+                </span>
+              ) : (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <Video className="w-3.5 h-3.5 mr-1 text-purple-400" />
+                  Campuran
+                </span>
+              )}
+            </div>
+            {taskDetail?.igPostUrls && taskDetail.igPostUrls.length > 0 && (
+              <div className="flex items-center gap-2 mt-2 flex-wrap">
+                {taskDetail.igPostUrls.map((url, uidx) => {
+                  const isYT = isYouTubeUrl(url);
+                  return (
+                    <a
+                      key={uidx}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`inline-flex items-center text-xs px-2.5 py-1 rounded-md border font-medium transition-colors ${
+                        isYT 
+                          ? 'bg-red-950/40 text-red-300 border-red-900/60 hover:bg-red-900/40' 
+                          : 'bg-zinc-800 text-blue-400 border-zinc-700 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {isYT ? <Youtube className="w-3.5 h-3.5 mr-1.5 text-red-400" /> : <Instagram className="w-3.5 h-3.5 mr-1.5 text-pink-400" />}
+                      {isYT ? `Buka Video YouTube #${uidx + 1}` : `Buka Postingan IG #${uidx + 1}`}
+                      <ExternalLink className="w-3 h-3 ml-1 text-zinc-400" />
+                    </a>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
         <button 
           onClick={handleExport}
-          className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm font-medium"
+          className="inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 text-sm font-medium self-start md:self-auto shrink-0 shadow-sm"
         >
           <Download className="w-4 h-4 mr-2" />
           Export Excel
@@ -723,22 +1132,31 @@ function TaskReport({ taskId, token, onBack }: { taskId: number, token: string, 
                   <td className="px-6 py-4">
                     {item.proofUrls && item.proofUrls.length > 0 && item.proofUrls.some(u => !!u) ? (
                       <div className="flex flex-wrap gap-1.5">
-                        {item.proofUrls.map((url, idx) => url ? (
-                          <button 
-                            key={idx} 
-                            type="button"
-                            onClick={() => setPreviewPhoto({
-                              url,
-                              studentName: item.name,
-                              npm: item.npm,
-                              linkNumber: idx + 1
-                            })}
-                            className="inline-flex items-center px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded hover:bg-blue-500/20 text-xs font-medium transition-colors"
-                          >
-                            <ImageIcon className="w-3 h-3 mr-1" />
-                            Bukti #{idx + 1}
-                          </button>
-                        ) : null)}
+                        {item.proofUrls.map((url, idx) => {
+                          if (!url) return null;
+                          const taskUrls = taskDetail?.igPostUrls || [];
+                          const isYT = isYouTubeUrl(taskUrls[idx]);
+                          return (
+                            <button 
+                              key={idx} 
+                              type="button"
+                              onClick={() => setPreviewPhoto({
+                                url,
+                                studentName: item.name,
+                                npm: item.npm,
+                                linkNumber: idx + 1
+                              })}
+                              className={`inline-flex items-center px-2 py-0.5 border rounded text-xs font-medium transition-colors ${
+                                isYT 
+                                  ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' 
+                                  : 'bg-blue-500/10 text-blue-400 border-blue-500/20 hover:bg-blue-500/20'
+                              }`}
+                            >
+                              {isYT ? <Youtube className="w-3 h-3 mr-1 text-red-500" /> : <ImageIcon className="w-3 h-3 mr-1" />}
+                              {isYT ? `YouTube #${idx + 1}` : `Bukti #${idx + 1}`}
+                            </button>
+                          );
+                        })}
                       </div>
                     ) : '-'}
                   </td>

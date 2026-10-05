@@ -131,6 +131,21 @@ async function deleteStoredFile(urlOrFileName: string | null) {
   }
 }
 
+// Helper to detect task platform (YouTube, Instagram, or Mixed)
+function detectTaskPlatform(urls: string[] = [], explicitPlatform?: string): 'INSTAGRAM' | 'YOUTUBE' | 'MIXED' {
+  if (explicitPlatform === 'YOUTUBE' || explicitPlatform === 'INSTAGRAM' || explicitPlatform === 'MIXED') {
+    return explicitPlatform;
+  }
+  const validUrls = (urls || []).filter(u => u && typeof u === 'string' && u.trim().length > 0);
+  if (validUrls.length === 0) return 'INSTAGRAM';
+  const ytCount = validUrls.filter(u => u.toLowerCase().includes('youtube.com') || u.toLowerCase().includes('youtu.be')).length;
+  const igCount = validUrls.filter(u => u.toLowerCase().includes('instagram.com')).length;
+  if (ytCount > 0 && igCount === 0) return 'YOUTUBE';
+  if (igCount > 0 && ytCount === 0) return 'INSTAGRAM';
+  if (ytCount > 0 && igCount > 0) return 'MIXED';
+  return 'INSTAGRAM';
+}
+
 // Setup Multer for memory uploads with generous size limits
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -143,13 +158,15 @@ const upload = multer({
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
-// Normalize URL for Vercel serverless rewrites (ensures /api prefix is present)
-app.use((req, res, next) => {
-  if (!req.url.startsWith('/api') && !req.url.startsWith('/uploads')) {
-    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
-  }
-  next();
-});
+// Normalize URL for Vercel serverless rewrites (ensures /api prefix is present only when running on Vercel)
+if (process.env.VERCEL) {
+  app.use((req, res, next) => {
+    if (!req.url.startsWith('/api') && !req.url.startsWith('/uploads')) {
+      req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+    }
+    next();
+  });
+}
 
 // Serve uploaded proofs from Neon PostgreSQL (with disk caching)
 app.get('/uploads/proofs/:fileName', async (req: any, res: any) => {
@@ -419,14 +436,18 @@ app.get('/api/admin/students', authMiddleware, adminMiddleware, async (req, res)
 });
 
 app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) => {
-  const { title, description, igPostUrls, igPostUrl, deadline, isOpen } = req.body;
+  const { title, description, igPostUrls, igPostUrl, deadline, isOpen, platform } = req.body;
   try {
+    const allUrls = igPostUrls || (igPostUrl ? [igPostUrl] : []);
+    const resolvedPlatform = detectTaskPlatform(allUrls, platform);
+
     const task = await prisma.task.create({
       data: { 
         title, 
         description, 
+        platform: resolvedPlatform,
         igPostUrl: igPostUrl || null,
-        igPostUrls: igPostUrls || [],
+        igPostUrls: allUrls,
         deadline: deadline ? new Date(deadline) : null,
         isOpen: isOpen !== undefined ? Boolean(isOpen) : true
       }
@@ -438,9 +459,15 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
       const deadlineText = task.deadline 
         ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })})` 
         : '';
+      const actionText = resolvedPlatform === 'YOUTUBE' 
+        ? 'Tonton video, berikan like & komentar!' 
+        : resolvedPlatform === 'MIXED'
+        ? 'Selesaikan tugas dan unggah bukti!'
+        : 'Segera berikan like, komen, dan repost!';
+      const tagText = resolvedPlatform === 'YOUTUBE' ? ' (YouTube)' : resolvedPlatform === 'MIXED' ? ' (YouTube & IG)' : '';
       const notifications = students.map(s => ({
         userId: s.id,
-        message: `Tugas Baru: ${title}${deadlineText}. Segera berikan like, komen, dan repost!`,
+        message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`,
       }));
       await prisma.notification.createMany({ data: notifications });
     }
@@ -453,12 +480,18 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
 
 app.patch('/api/admin/tasks/:taskId', authMiddleware, adminMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.taskId);
-  const { title, description, igPostUrls, deadline, isOpen } = req.body;
+  const { title, description, igPostUrls, deadline, isOpen, platform } = req.body;
   try {
     const updateData: any = {};
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
-    if (igPostUrls !== undefined) updateData.igPostUrls = igPostUrls;
+    if (igPostUrls !== undefined) {
+      updateData.igPostUrls = igPostUrls;
+      if (platform === undefined) {
+        updateData.platform = detectTaskPlatform(igPostUrls);
+      }
+    }
+    if (platform !== undefined) updateData.platform = platform;
     if (deadline !== undefined) updateData.deadline = deadline ? new Date(deadline) : null;
     if (isOpen !== undefined) updateData.isOpen = Boolean(isOpen);
 
@@ -502,6 +535,7 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
     const now = new Date();
     const tasksWithClosedStatus = tasks.map(t => ({
       ...t,
+      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
       isClosed: !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false)
     }));
 
@@ -516,7 +550,11 @@ app.get('/api/admin/report/all', authMiddleware, adminMiddleware, async (req, re
     const tasks = await prisma.task.findMany({ orderBy: { createdAt: 'asc' } });
     const students = await prisma.user.findMany({ where: { role: 'STUDENT' }, orderBy: { name: 'asc' } });
     const submissions = await prisma.submission.findMany();
-    res.json({ tasks, students, submissions });
+    const formattedTasks = tasks.map(t => ({
+      ...t,
+      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : []))
+    }));
+    res.json({ tasks: formattedTasks, students, submissions });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
@@ -553,7 +591,12 @@ app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, asyn
       };
     });
 
-    res.json({ task, report });
+    const taskWithPlatform = {
+      ...task,
+      platform: task.platform || detectTaskPlatform(task.igPostUrls || (task.igPostUrl ? [task.igPostUrl] : []))
+    };
+
+    res.json({ task: taskWithPlatform, report });
   } catch (error: any) {
     console.error(error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -574,6 +617,7 @@ app.get('/api/student/tasks', authMiddleware, async (req: any, res: any) => {
       const isClosed = !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false);
       return {
         ...t,
+        platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
         hasUploaded: isSubmitted,
         isClosed,
         submission: submission || null,

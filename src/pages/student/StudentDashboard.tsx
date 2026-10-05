@@ -18,8 +18,19 @@ import {
   Check,
   RefreshCw,
   Lock,
-  RotateCcw
+  RotateCcw,
+  Youtube,
+  Instagram,
+  Play,
+  Video
 } from 'lucide-react';
+import { 
+  isYouTubeUrl, 
+  isInstagramUrl, 
+  getYouTubeThumbnail, 
+  detectPlatform, 
+  getLinkActionLabel 
+} from '../../utils/platformHelper';
 
 export function StudentDashboard() {
   const { token } = useAuth();
@@ -31,8 +42,11 @@ export function StudentDashboard() {
   const [finalizingId, setFinalizingId] = useState<number | null>(null);
   const [unsubmittingId, setUnsubmittingId] = useState<number | null>(null);
 
+  // Platform filter
+  const [platformFilter, setPlatformFilter] = useState<'ALL' | 'YOUTUBE' | 'INSTAGRAM'>('ALL');
+
   // Modal preview photo state
-  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; title: string; linkNumber?: number } | null>(null);
+  const [previewPhoto, setPreviewPhoto] = useState<{ url: string; title: string; linkNumber?: number; isYouTube?: boolean } | null>(null);
 
   // Modal confirmation before submit
   const [confirmSubmitTask, setConfirmSubmitTask] = useState<StudentTask | null>(null);
@@ -193,19 +207,74 @@ export function StudentDashboard() {
 
       {/* Main Task List */}
       <div className="lg:col-span-2 space-y-6">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-zinc-100">Daftar Tugas Presensi</h2>
-          <span className="text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+          <div>
+            <h2 className="text-2xl font-bold text-zinc-100">Daftar Tugas Presensi</h2>
+            <p className="text-xs text-zinc-400 mt-0.5">Selesaikan tugas YouTube & Instagram, lalu unggah bukti screenshot untuk verifikasi presensi</p>
+          </div>
+          <span className="text-xs text-zinc-400 bg-zinc-900 border border-zinc-800 px-3 py-1.5 rounded-lg shrink-0">
             {tasks.filter(t => t.submission?.status === 'SUBMITTED').length} dari {tasks.length} Selesai
           </span>
         </div>
 
-        {tasks.length === 0 ? (
-          <div className="bg-zinc-900 rounded-xl p-8 text-center text-zinc-500 border border-zinc-800">
-            Belum ada tugas presensi saat ini.
-          </div>
-        ) : (
-          tasks.map(task => {
+        {/* Platform Category Filter */}
+        <div className="flex items-center gap-2 pb-1 overflow-x-auto">
+          <span className="text-xs text-zinc-400 font-medium mr-1">Filter Kategori:</span>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'ALL'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            Semua ({tasks.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('YOUTUBE')}
+            className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'YOUTUBE'
+                ? 'bg-red-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            <Youtube className="w-3.5 h-3.5 mr-1.5 text-red-500" />
+            YouTube ({tasks.filter(t => (t.platform || detectPlatform(t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls : (t.igPostUrl ? [t.igPostUrl] : []))) === 'YOUTUBE').length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setPlatformFilter('INSTAGRAM')}
+            className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              platformFilter === 'INSTAGRAM'
+                ? 'bg-pink-600 text-white shadow-sm'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 border border-zinc-800'
+            }`}
+          >
+            <Instagram className="w-3.5 h-3.5 mr-1.5 text-pink-400" />
+            Instagram ({tasks.filter(t => (t.platform || detectPlatform(t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls : (t.igPostUrl ? [t.igPostUrl] : []))) === 'INSTAGRAM').length})
+          </button>
+        </div>
+
+        {(() => {
+          const filteredTasks = tasks.filter(task => {
+            const p = task.platform || detectPlatform(task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls : (task.igPostUrl ? [task.igPostUrl] : []));
+            if (platformFilter === 'ALL') return true;
+            return p === platformFilter;
+          });
+
+          if (filteredTasks.length === 0) {
+            return (
+              <div className="bg-zinc-900 rounded-xl p-8 text-center text-zinc-500 border border-zinc-800">
+                {tasks.length === 0 
+                  ? 'Belum ada tugas presensi saat ini.' 
+                  : 'Tidak ada tugas pada kategori yang dipilih.'}
+              </div>
+            );
+          }
+
+          return filteredTasks.map(task => {
             const urls = task.igPostUrls && task.igPostUrls.length > 0 
               ? task.igPostUrls 
               : (task.igPostUrl ? [task.igPostUrl] : []);
@@ -219,6 +288,10 @@ export function StudentDashboard() {
             const now = new Date();
             const isPassedDeadline = task.deadline ? now > new Date(task.deadline) : false;
             const isTaskClosed = task.isClosed || !task.isOpen || isPassedDeadline;
+            const taskPlatform = task.platform || detectPlatform(urls);
+
+            const firstYtUrl = urls.find(isYouTubeUrl);
+            const firstYtThumb = firstYtUrl ? getYouTubeThumbnail(firstYtUrl) : null;
 
             return (
               <div key={task.id} className={`bg-zinc-900 p-6 rounded-xl border transition-all ${
@@ -227,10 +300,28 @@ export function StudentDashboard() {
                 {/* Task Header */}
                 <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-3 mb-3">
                   <div>
-                    <h3 className="text-xl font-semibold text-zinc-100">{task.title}</h3>
-                    <p className="text-zinc-400 mt-1 text-sm leading-relaxed">{task.description}</p>
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      {taskPlatform === 'YOUTUBE' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-red-500/10 text-red-400 border border-red-500/20">
+                          <Youtube className="w-3.5 h-3.5 mr-1 text-red-500" />
+                          YouTube
+                        </span>
+                      ) : taskPlatform === 'INSTAGRAM' ? (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-pink-500/10 text-pink-400 border border-pink-500/20">
+                          <Instagram className="w-3.5 h-3.5 mr-1 text-pink-400" />
+                          Instagram
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                          <Video className="w-3.5 h-3.5 mr-1 text-purple-400" />
+                          Campuran
+                        </span>
+                      )}
+                      <h3 className="text-xl font-semibold text-zinc-100">{task.title}</h3>
+                    </div>
+                    <p className="text-zinc-400 text-sm leading-relaxed whitespace-pre-line">{task.description}</p>
                   </div>
-                  <div>
+                  <div className="shrink-0">
                     {isSubmitted ? (
                       <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 whitespace-nowrap">
                         <CheckCircle className="w-3.5 h-3.5 mr-1.5" />
@@ -254,6 +345,36 @@ export function StudentDashboard() {
                     )}
                   </div>
                 </div>
+
+                {/* YouTube Video Featured Banner if available */}
+                {firstYtThumb && (
+                  <a
+                    href={firstYtUrl!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block relative my-4 rounded-xl overflow-hidden border border-zinc-800 bg-black aspect-video max-h-48 group cursor-pointer shadow-lg"
+                    title="Buka dan tonton video YouTube"
+                  >
+                    <img 
+                      src={firstYtThumb} 
+                      alt="Thumbnail Video YouTube" 
+                      className="w-full h-full object-cover opacity-85 group-hover:opacity-100 transition-opacity" 
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/20 transition-colors">
+                      <div className="w-12 h-12 rounded-full bg-red-600 flex items-center justify-center text-white shadow-xl group-hover:scale-110 transition-transform">
+                        <Play className="w-5 h-5 fill-white ml-0.5" />
+                      </div>
+                    </div>
+                    <div className="absolute top-2 left-2 px-2.5 py-1 bg-red-600/90 text-white font-semibold rounded-lg text-xs flex items-center gap-1.5 shadow-md">
+                      <Youtube className="w-3.5 h-3.5" />
+                      Video YouTube
+                    </div>
+                    <div className="absolute bottom-2 right-2 px-2.5 py-1 bg-black/80 rounded-md text-xs text-zinc-200 flex items-center gap-1">
+                      <ExternalLink className="w-3.5 h-3.5 text-red-400" />
+                      Tonton di YouTube
+                    </div>
+                  </a>
+                )}
 
                 {/* Deadline Info Bar */}
                 {task.deadline && (
@@ -290,6 +411,9 @@ export function StudentDashboard() {
                     const currentProofUrl = proofUrls[i] || '';
                     const isUploadingThis = uploadingId === `${task.id}-${i}`;
                     const isDeletingThis = deletingId === `${task.id}-${i}`;
+                    const isYT = isYouTubeUrl(url);
+                    const isIG = isInstagramUrl(url);
+                    const ytThumb = isYT ? getYouTubeThumbnail(url) : null;
 
                     return (
                       <div 
@@ -297,22 +421,40 @@ export function StudentDashboard() {
                         className={`p-3.5 rounded-xl border transition-all ${
                           hasProof 
                             ? 'bg-zinc-950/60 border-zinc-800/90' 
+                            : isYT
+                            ? 'bg-red-950/10 border-red-900/30'
                             : 'bg-zinc-900/90 border-zinc-800/50'
                         }`}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                          {/* IG Post Link */}
-                          <a 
-                            href={url} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="flex items-center text-sm font-medium text-zinc-300 hover:text-blue-400 transition-colors group"
-                          >
-                            <ExternalLink className="w-4 h-4 mr-2 text-zinc-500 group-hover:text-blue-400 shrink-0" />
-                            <span className="underline-offset-4 group-hover:underline">
-                              Buka Postingan IG {urls.length > 1 ? `#${i + 1}` : ''}
-                            </span>
-                          </a>
+                          {/* Post / Video Link Button */}
+                          <div>
+                            <a 
+                              href={url} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className={`inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors group ${
+                                isYT 
+                                  ? 'bg-red-600/10 text-red-400 hover:bg-red-600/20 border border-red-600/30' 
+                                  : 'bg-pink-600/10 text-pink-400 hover:bg-pink-600/20 border border-pink-600/30'
+                              }`}
+                            >
+                              {isYT ? (
+                                <Youtube className="w-4 h-4 mr-2 text-red-500 shrink-0" />
+                              ) : (
+                                <Instagram className="w-4 h-4 mr-2 text-pink-400 shrink-0" />
+                              )}
+                              <span>
+                                {isYT ? `Buka Video YouTube ${urls.length > 1 ? `#${i + 1}` : ''}` : `Buka Postingan IG ${urls.length > 1 ? `#${i + 1}` : ''}`}
+                              </span>
+                              <ExternalLink className="w-3.5 h-3.5 ml-1.5 opacity-70 group-hover:opacity-100" />
+                            </a>
+                            <p className="text-[11px] text-zinc-400 mt-1.5">
+                              {isYT 
+                                ? 'Tonton video, beri Like, tinggalkan Komentar (Nama & NPM), lalu unggah screenshot bukti.' 
+                                : 'Buka postingan, berikan Like & tinggalkan Komentar, lalu unggah screenshot bukti.'}
+                            </p>
+                          </div>
 
                           {/* Proof Actions */}
                           <div className="flex items-center gap-2 flex-wrap">
@@ -321,7 +463,7 @@ export function StudentDashboard() {
                                 {/* Thumbnail Image */}
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewPhoto({ url: currentProofUrl, title: task.title, linkNumber: i + 1 })}
+                                  onClick={() => setPreviewPhoto({ url: currentProofUrl, title: task.title, linkNumber: i + 1, isYouTube: isYT })}
                                   className="relative group w-9 h-9 rounded-md overflow-hidden bg-black/50 border border-zinc-700 shrink-0 cursor-pointer"
                                   title="Klik untuk memperbesar foto bukti"
                                 >
@@ -338,7 +480,7 @@ export function StudentDashboard() {
                                 {/* Check / Preview Button */}
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewPhoto({ url: currentProofUrl, title: task.title, linkNumber: i + 1 })}
+                                  onClick={() => setPreviewPhoto({ url: currentProofUrl, title: task.title, linkNumber: i + 1, isYouTube: isYT })}
                                   className="inline-flex items-center px-2.5 py-1 text-xs font-medium text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-md transition-colors"
                                 >
                                   <Eye className="w-3.5 h-3.5 mr-1" />
@@ -397,7 +539,11 @@ export function StudentDashboard() {
                                 ) : (
                                   <Upload className="w-3.5 h-3.5 mr-1.5" />
                                 )}
-                                {isUploadingThis ? 'Memproses & Mengunggah...' : `Unggah Foto Bukti ${urls.length > 1 ? `#${i + 1}` : ''}`}
+                                {isUploadingThis 
+                                  ? 'Memproses & Mengunggah...' 
+                                  : isYT
+                                  ? `Unggah Bukti Video ${urls.length > 1 ? `#${i + 1}` : ''}`
+                                  : `Unggah Bukti IG ${urls.length > 1 ? `#${i + 1}` : ''}`}
                                 <input 
                                   type="file" 
                                   accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp" 
@@ -508,8 +654,8 @@ export function StudentDashboard() {
                 </div>
               </div>
             );
-          })
-        )}
+          });
+        })()}
       </div>
 
       {/* Notifications Sidebar */}
@@ -552,8 +698,12 @@ export function StudentDashboard() {
             <div className="px-5 py-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-950/80">
               <div>
                 <h4 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
-                  <ImageIcon className="w-4 h-4 text-blue-400" />
-                  Foto Bukti {previewPhoto.linkNumber ? `Postingan #${previewPhoto.linkNumber}` : ''}
+                  {previewPhoto.isYouTube ? (
+                    <Youtube className="w-4 h-4 text-red-500" />
+                  ) : (
+                    <ImageIcon className="w-4 h-4 text-blue-400" />
+                  )}
+                  Foto Bukti {previewPhoto.isYouTube ? 'Video YouTube' : 'Postingan IG'} {previewPhoto.linkNumber ? `#${previewPhoto.linkNumber}` : ''}
                 </h4>
                 <p className="text-xs text-zinc-400 mt-0.5 line-clamp-1">{previewPhoto.title}</p>
               </div>

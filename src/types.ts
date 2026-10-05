@@ -6,10 +6,13 @@ export interface User {
   role: 'ADMIN' | 'STUDENT';
 }
 
+export type TaskPlatform = 'INSTAGRAM' | 'YOUTUBE' | 'MIXED';
+
 export interface Task {
   id: number;
   title: string;
   description: string;
+  platform?: TaskPlatform;
   igPostUrl?: string;
   igPostUrls: string[];
   deadline?: string | null;
