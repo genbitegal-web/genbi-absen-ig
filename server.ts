@@ -8,7 +8,6 @@ import os from 'os';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { v2 as cloudinary } from 'cloudinary';
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
@@ -17,58 +16,8 @@ if (!process.env.DIRECT_URL) {
   process.env.DIRECT_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
 }
 
-// Setup Cloudinary Configuration
-if (process.env.CLOUDINARY_URL) {
-  cloudinary.config({
-    cloudinary_url: process.env.CLOUDINARY_URL,
-  });
-} else if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-    secure: true,
-  });
-}
-
-function isCloudinaryConfigured(): boolean {
-  return Boolean(
-    process.env.CLOUDINARY_URL || 
-    (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET)
-  );
-}
-
-// Extract Cloudinary public_id from secure_url (e.g. genbi_proofs/sample123)
-function getCloudinaryPublicId(url: string): string | null {
-  if (!url || !url.includes('cloudinary.com')) return null;
-  const match = url.match(/\/upload\/(?:v\d+\/)?([^\.]+)/);
-  return match ? match[1] : null;
-}
-
-// Upload buffer directly to Cloudinary using upload_stream
-async function uploadToCloudinary(buffer: Buffer): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: 'genbi_proofs',
-        resource_type: 'auto',
-      },
-      (error, result) => {
-        if (error) {
-          return reject(error);
-        }
-        if (!result?.secure_url) {
-          return reject(new Error('Upload Cloudinary tidak menghasilkan secure_url'));
-        }
-        resolve(result.secure_url);
-      }
-    );
-    uploadStream.end(buffer);
-  });
-}
-
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3005;
 const SECRET_KEY = process.env.JWT_SECRET || 'kunci_rahasia_genbi_tegal_2024';
 
 const prisma = new PrismaClient({
@@ -92,26 +41,14 @@ try {
   console.warn('Upload directory initialization notice:', e);
 }
 
-// Helper to remove stored file from Cloudinary, Neon Database, and local cache
+// Helper to remove stored file from Neon Database and local cache
 async function deleteStoredFile(urlOrFileName: string | null) {
   if (!urlOrFileName) return;
-
-  // 1. Delete from Cloudinary if URL is from Cloudinary
-  if (urlOrFileName.includes('cloudinary.com')) {
-    const publicId = getCloudinaryPublicId(urlOrFileName);
-    if (publicId) {
-      try {
-        await cloudinary.uploader.destroy(publicId);
-      } catch (e) {
-        console.warn('Gagal menghapus file dari Cloudinary:', publicId, e);
-      }
-    }
-  }
 
   const fileName = urlOrFileName.includes('/') ? urlOrFileName.split('/').pop() : urlOrFileName;
   if (!fileName) return;
 
-  // 2. Delete from Neon Postgres database (if stored there)
+  // 1. Delete from Neon Postgres database (if stored there)
   try {
     await prisma.proofFile.deleteMany({
       where: { fileName }
@@ -120,7 +57,7 @@ async function deleteStoredFile(urlOrFileName: string | null) {
     console.warn('Gagal menghapus file dari database Neon:', fileName, e);
   }
 
-  // 3. Delete from local disk cache
+  // 2. Delete from local disk cache
   const localPath = path.join(UPLOAD_DIR, fileName);
   if (fs.existsSync(localPath)) {
     try {
@@ -168,41 +105,17 @@ if (process.env.VERCEL) {
   });
 }
 
-// Serve uploaded proofs from Neon PostgreSQL (with disk caching)
-app.get('/uploads/proofs/:fileName', async (req: any, res: any) => {
-  try {
-    const { fileName } = req.params;
-    const localPath = path.join(UPLOAD_DIR, fileName);
+// Melayani file upload langsung dari local storage disk VPS
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-    // If already in local cache, send directly
-    if (fs.existsSync(localPath)) {
-      return res.sendFile(localPath);
-    }
+app.get('/uploads/proofs/:fileName', (req: any, res: any) => {
+  const { fileName } = req.params;
+  const localPath = path.join(UPLOAD_DIR, fileName);
 
-    // Otherwise, stream from Neon Database
-    const file = await prisma.proofFile.findUnique({
-      where: { fileName }
-    });
-
-    if (!file) {
-      return res.status(404).send('File bukti tidak ditemukan di Neon Storage');
-    }
-
-    // Cache locally for faster subsequent access
-    try {
-      fs.writeFileSync(localPath, file.data);
-    } catch (cacheErr) {
-      console.warn('Failed to cache file to disk:', cacheErr);
-    }
-
-    res.setHeader('Content-Type', file.mimeType || 'image/jpeg');
-    res.setHeader('Content-Length', file.size || file.data.length);
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    return res.end(Buffer.from(file.data));
-  } catch (err: any) {
-    console.error('Error fetching file from Neon storage:', err);
-    return res.status(500).send('Gagal memuat file dari Neon Storage');
+  if (fs.existsSync(localPath)) {
+    return res.sendFile(localPath);
   }
+  return res.status(404).send('File bukti tidak ditemukan di server lokal');
 });
 
 // Middlewares
@@ -251,7 +164,7 @@ app.get('/api/auth/me', authMiddleware, async (req: any, res: any) => {
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user) return res.status(404).json({ error: 'Not found' });
     res.json({ user: { id: user.id, npm: user.npm, name: user.name, role: user.role, campus: user.campus } });
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -337,18 +250,17 @@ app.post('/api/admin/students/bulk-delete', authMiddleware, adminMiddleware, asy
     await prisma.user.deleteMany({ where: { id: { in: validStudentIds } } });
     
     res.json({ message: `${validStudentIds.length} Mahasiswa berhasil dihapus` });
-  } catch (error) {
+  } catch (error: any) {
     console.error("Bulk Delete Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
 
 app.post('/api/admin/import-students', authMiddleware, adminMiddleware, async (req, res) => {
-  const { students } = req.body; // array of { npm, name, campus }
+  const { students } = req.body;
   try {
     const defaultPassword = await bcrypt.hash('12345', 10);
     
-    // Filter out invalid students
     const validStudents = students.filter((s: any) => s.npm && s.name && s.campus).map((s: any) => ({
       npm: String(s.npm),
       name: s.name,
@@ -397,7 +309,7 @@ app.post('/api/admin/students', authMiddleware, adminMiddleware, async (req, res
       }
     });
     res.json(student);
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -415,7 +327,7 @@ app.put('/api/admin/students/:id', authMiddleware, adminMiddleware, async (req, 
       data: dataToUpdate
     });
     res.json(updatedStudent);
-  } catch (error) {
+  } catch (error: any) {
     if (error.code === 'P2002') {
       return res.status(400).json({ error: 'NPM sudah terdaftar' });
     }
@@ -430,7 +342,7 @@ app.get('/api/admin/students', authMiddleware, adminMiddleware, async (req, res)
       select: { id: true, npm: true, name: true, campus: true, createdAt: true }
     });
     res.json(students);
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -453,27 +365,31 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
       }
     });
 
-    // Notify all students
-    const students = await prisma.user.findMany({ where: { role: 'STUDENT' } });
-    if (students.length > 0) {
-      const deadlineText = task.deadline 
-        ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })})` 
-        : '';
-      const actionText = resolvedPlatform === 'YOUTUBE' 
-        ? 'Tonton video, berikan like & komentar!' 
-        : resolvedPlatform === 'MIXED'
-        ? 'Selesaikan tugas dan unggah bukti!'
-        : 'Segera berikan like, komen, dan repost!';
-      const tagText = resolvedPlatform === 'YOUTUBE' ? ' (YouTube)' : resolvedPlatform === 'MIXED' ? ' (YouTube & IG)' : '';
-      const notifications = students.map(s => ({
-        userId: s.id,
-        message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`,
-      }));
-      await prisma.notification.createMany({ data: notifications });
+    try {
+      const students = await prisma.user.findMany({ where: { role: 'STUDENT' } });
+      if (students.length > 0) {
+        const deadlineText = task.deadline 
+          ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })})` 
+          : '';
+        const actionText = resolvedPlatform === 'YOUTUBE' 
+          ? 'Tonton video, berikan like & komentar!' 
+          : resolvedPlatform === 'MIXED'
+          ? 'Selesaikan tugas dan unggah bukti!'
+          : 'Segera berikan like, komen, dan repost!';
+        const tagText = resolvedPlatform === 'YOUTUBE' ? ' (YouTube)' : resolvedPlatform === 'MIXED' ? ' (YouTube & IG)' : '';
+        const notifications = students.map(s => ({
+          userId: s.id,
+          message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`,
+        }));
+        await prisma.notification.createMany({ data: notifications });
+      }
+    } catch (notifErr) {
+      console.warn("Warning: Gagal mengirim notifikasi massal:", notifErr);
     }
 
     res.json(task);
   } catch (error: any) {
+    console.error("Admin Task Create Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -560,7 +476,6 @@ app.get('/api/admin/report/all', authMiddleware, adminMiddleware, async (req, re
   }
 });
 
-// Report for a specific task (who has liked/uploaded vs who hasn't)
 app.get('/api/admin/tasks/:taskId/report', authMiddleware, adminMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.taskId);
   try {
@@ -653,54 +568,15 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
       ? path.basename(req.file.originalname, originalExt).replace(/[^a-zA-Z0-9]/g, '') 
       : 'proof';
     const fileName = `${uniqueSuffix}-${baseClean || 'proof'}${ext}`;
-    const contentType = req.file.mimetype && req.file.mimetype !== 'application/octet-stream' 
-      ? req.file.mimetype 
-      : 'image/jpeg';
 
-    let filePublicUrl = '';
-
-    // If Cloudinary credentials are provided, upload directly to Cloudinary
-    if (isCloudinaryConfigured()) {
-      try {
-        filePublicUrl = await uploadToCloudinary(req.file.buffer);
-      } catch (cloudErr: any) {
-        console.warn('Cloudinary upload failed, falling back to Neon database storage:', cloudErr?.message);
-      }
-    }
-
-    // Fallback or default to Neon database + disk cache
-    if (!filePublicUrl) {
-      // 1. Store proof permanently in Neon PostgreSQL database
-      await prisma.proofFile.upsert({
-        where: { fileName },
-        create: {
-          fileName,
-          mimeType: contentType,
-          data: req.file.buffer,
-          size: req.file.size || req.file.buffer.length
-        },
-        update: {
-          mimeType: contentType,
-          data: req.file.buffer,
-          size: req.file.size || req.file.buffer.length
-        }
-      });
-
-      // 2. Also write to local cache for fast disk delivery
-      try {
-        const filePath = path.join(UPLOAD_DIR, fileName);
-        fs.writeFileSync(filePath, req.file.buffer);
-      } catch (cacheErr) {
-        console.warn('Failed to write local disk cache:', cacheErr);
-      }
-
-      filePublicUrl = `/uploads/proofs/${fileName}`;
-    }
+    // Simpan langsung ke local storage disk VPS
+    const filePath = path.join(UPLOAD_DIR, fileName);
+    fs.writeFileSync(filePath, req.file.buffer);
+    const filePublicUrl = `/uploads/proofs/${fileName}`;
 
     let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
 
     if (submission) {
-      // If previous proof existed at this index, clean it up
       const oldUrl = submission.proofUrls[linkIndex];
       if (oldUrl && oldUrl !== filePublicUrl) {
         await deleteStoredFile(oldUrl);
@@ -719,13 +595,25 @@ app.post('/api/student/tasks/:taskId/submit', authMiddleware, upload.single('pro
     } else {
       const initialProofUrls = new Array(totalLinks).fill("");
       initialProofUrls[linkIndex] = filePublicUrl;
-      submission = await prisma.submission.create({
-        data: {
-          taskId,
-          studentId,
+      // Menggunakan upsert untuk mencegah error P2002 (Unique constraint failed)
+      submission = await prisma.submission.upsert({
+        where: {
+          taskId_studentId: {
+            taskId: taskId,
+            studentId: studentId,
+          },
+        },
+        update: {
           proofUrls: initialProofUrls,
-          status: 'PENDING'
-        }
+          status: 'PENDING',
+          updatedAt: new Date(),
+        },
+        create: {
+          taskId: taskId,
+          studentId: studentId,
+          proofUrls: initialProofUrls,
+          status: 'PENDING',
+        },
       });
     }
 
@@ -848,7 +736,7 @@ app.get('/api/student/notifications', authMiddleware, async (req: any, res: any)
       orderBy: { createdAt: 'desc' }
     });
     res.json(notifications);
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -874,7 +762,7 @@ async function seedAdmin() {
       });
       console.log('Default admin created: npm=admin, password=admin123');
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('⚠️ Failed to seed admin user. Database might not be connected yet.', error);
   }
 }
@@ -882,7 +770,6 @@ async function seedAdmin() {
 async function startServer() {
   await seedAdmin();
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -900,7 +787,7 @@ async function startServer() {
 
   if (!process.env.VERCEL) {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server running on port ${PORT}`);
     });
   }
 }

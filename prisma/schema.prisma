@@ -4,9 +4,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -27,7 +26,7 @@ model Task {
   description String
   platform    String       @default("INSTAGRAM")
   igPostUrl   String?
-  igPostUrls  String[]     @default([])
+  igPostUrls   Json?
   deadline    DateTime?
   isOpen      Boolean      @default(true)
   createdAt   DateTime     @default(now())
@@ -38,7 +37,7 @@ model Submission {
   id        Int      @id @default(autoincrement())
   taskId    Int
   studentId Int
-  proofUrls String[] @default([])
+  proofUrls    Json?
   status    String   @default("PENDING")
   createdAt DateTime @default(now())
   student   User     @relation(fields: [studentId], references: [id])

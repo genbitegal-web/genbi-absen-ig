@@ -59,7 +59,7 @@ async function uploadToCloudinary(buffer) {
   });
 }
 var app = express();
-var PORT = 3e3;
+var PORT = process.env.PORT || 3005;
 var SECRET_KEY = process.env.JWT_SECRET || "kunci_rahasia_genbi_tegal_2024";
 var prisma = new PrismaClient({
   datasources: {
@@ -106,6 +106,19 @@ async function deleteStoredFile(urlOrFileName) {
     }
   }
 }
+function detectTaskPlatform(urls = [], explicitPlatform) {
+  if (explicitPlatform === "YOUTUBE" || explicitPlatform === "INSTAGRAM" || explicitPlatform === "MIXED") {
+    return explicitPlatform;
+  }
+  const validUrls = (urls || []).filter((u) => u && typeof u === "string" && u.trim().length > 0);
+  if (validUrls.length === 0) return "INSTAGRAM";
+  const ytCount = validUrls.filter((u) => u.toLowerCase().includes("youtube.com") || u.toLowerCase().includes("youtu.be")).length;
+  const igCount = validUrls.filter((u) => u.toLowerCase().includes("instagram.com")).length;
+  if (ytCount > 0 && igCount === 0) return "YOUTUBE";
+  if (igCount > 0 && ytCount === 0) return "INSTAGRAM";
+  if (ytCount > 0 && igCount > 0) return "MIXED";
+  return "INSTAGRAM";
+}
 var storage = multer.memoryStorage();
 var upload = multer({
   storage,
@@ -116,32 +129,22 @@ var upload = multer({
 });
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
-app.get("/uploads/proofs/:fileName", async (req, res) => {
-  try {
-    const { fileName } = req.params;
-    const localPath = path.join(UPLOAD_DIR, fileName);
-    if (fs.existsSync(localPath)) {
-      return res.sendFile(localPath);
+if (process.env.VERCEL) {
+  app.use((req, res, next) => {
+    if (!req.url.startsWith("/api") && !req.url.startsWith("/uploads")) {
+      req.url = "/api" + (req.url.startsWith("/") ? req.url : "/" + req.url);
     }
-    const file = await prisma.proofFile.findUnique({
-      where: { fileName }
-    });
-    if (!file) {
-      return res.status(404).send("File bukti tidak ditemukan di Neon Storage");
-    }
-    try {
-      fs.writeFileSync(localPath, file.data);
-    } catch (cacheErr) {
-      console.warn("Failed to cache file to disk:", cacheErr);
-    }
-    res.setHeader("Content-Type", file.mimeType || "image/jpeg");
-    res.setHeader("Content-Length", file.size || file.data.length);
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    return res.end(Buffer.from(file.data));
-  } catch (err) {
-    console.error("Error fetching file from Neon storage:", err);
-    return res.status(500).send("Gagal memuat file dari Neon Storage");
+    next();
+  });
+}
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+app.get("/uploads/proofs/:fileName", (req, res) => {
+  const { fileName } = req.params;
+  const localPath = path.join(UPLOAD_DIR, fileName);
+  if (fs.existsSync(localPath)) {
+    return res.sendFile(localPath);
   }
+  return res.status(404).send("File bukti tidak ditemukan di server lokal");
 });
 var authMiddleware = (req, res, next) => {
   const token = req.headers.authorization?.split(" ")[1];
@@ -340,14 +343,17 @@ app.get("/api/admin/students", authMiddleware, adminMiddleware, async (req, res)
   }
 });
 app.post("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) => {
-  const { title, description, igPostUrls, igPostUrl, deadline, isOpen } = req.body;
+  const { title, description, igPostUrls, igPostUrl, deadline, isOpen, platform } = req.body;
   try {
+    const allUrls = igPostUrls || (igPostUrl ? [igPostUrl] : []);
+    const resolvedPlatform = detectTaskPlatform(allUrls, platform);
     const task = await prisma.task.create({
       data: {
         title,
         description,
+        platform: resolvedPlatform,
         igPostUrl: igPostUrl || null,
-        igPostUrls: igPostUrls || [],
+        igPostUrls: allUrls,
         deadline: deadline ? new Date(deadline) : null,
         isOpen: isOpen !== void 0 ? Boolean(isOpen) : true
       }
@@ -355,9 +361,11 @@ app.post("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) =
     const students = await prisma.user.findMany({ where: { role: "STUDENT" } });
     if (students.length > 0) {
       const deadlineText = task.deadline ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })})` : "";
+      const actionText = resolvedPlatform === "YOUTUBE" ? "Tonton video, berikan like & komentar!" : resolvedPlatform === "MIXED" ? "Selesaikan tugas dan unggah bukti!" : "Segera berikan like, komen, dan repost!";
+      const tagText = resolvedPlatform === "YOUTUBE" ? " (YouTube)" : resolvedPlatform === "MIXED" ? " (YouTube & IG)" : "";
       const notifications = students.map((s) => ({
         userId: s.id,
-        message: `Tugas Baru: ${title}${deadlineText}. Segera berikan like, komen, dan repost!`
+        message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`
       }));
       await prisma.notification.createMany({ data: notifications });
     }
@@ -368,12 +376,18 @@ app.post("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) =
 });
 app.patch("/api/admin/tasks/:taskId", authMiddleware, adminMiddleware, async (req, res) => {
   const taskId = parseInt(req.params.taskId);
-  const { title, description, igPostUrls, deadline, isOpen } = req.body;
+  const { title, description, igPostUrls, deadline, isOpen, platform } = req.body;
   try {
     const updateData = {};
     if (title !== void 0) updateData.title = title;
     if (description !== void 0) updateData.description = description;
-    if (igPostUrls !== void 0) updateData.igPostUrls = igPostUrls;
+    if (igPostUrls !== void 0) {
+      updateData.igPostUrls = igPostUrls;
+      if (platform === void 0) {
+        updateData.platform = detectTaskPlatform(igPostUrls);
+      }
+    }
+    if (platform !== void 0) updateData.platform = platform;
     if (deadline !== void 0) updateData.deadline = deadline ? new Date(deadline) : null;
     if (isOpen !== void 0) updateData.isOpen = Boolean(isOpen);
     const task = await prisma.task.update({
@@ -412,6 +426,7 @@ app.get("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) =>
     const now = /* @__PURE__ */ new Date();
     const tasksWithClosedStatus = tasks.map((t) => ({
       ...t,
+      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
       isClosed: !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false)
     }));
     res.json(tasksWithClosedStatus);
@@ -424,7 +439,11 @@ app.get("/api/admin/report/all", authMiddleware, adminMiddleware, async (req, re
     const tasks = await prisma.task.findMany({ orderBy: { createdAt: "asc" } });
     const students = await prisma.user.findMany({ where: { role: "STUDENT" }, orderBy: { name: "asc" } });
     const submissions = await prisma.submission.findMany();
-    res.json({ tasks, students, submissions });
+    const formattedTasks = tasks.map((t) => ({
+      ...t,
+      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : []))
+    }));
+    res.json({ tasks: formattedTasks, students, submissions });
   } catch (error) {
     res.status(500).json({ error: error.message || "Unknown error" });
   }
@@ -455,7 +474,11 @@ app.get("/api/admin/tasks/:taskId/report", authMiddleware, adminMiddleware, asyn
         submittedAt: submission ? submission.createdAt : null
       };
     });
-    res.json({ task, report });
+    const taskWithPlatform = {
+      ...task,
+      platform: task.platform || detectTaskPlatform(task.igPostUrls || (task.igPostUrl ? [task.igPostUrl] : []))
+    };
+    res.json({ task: taskWithPlatform, report });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -473,6 +496,7 @@ app.get("/api/student/tasks", authMiddleware, async (req, res) => {
       const isClosed = !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false);
       return {
         ...t,
+        platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
         hasUploaded: isSubmitted,
         isClosed,
         submission: submission || null
@@ -511,26 +535,8 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
       }
     }
     if (!filePublicUrl) {
-      await prisma.proofFile.upsert({
-        where: { fileName },
-        create: {
-          fileName,
-          mimeType: contentType,
-          data: req.file.buffer,
-          size: req.file.size || req.file.buffer.length
-        },
-        update: {
-          mimeType: contentType,
-          data: req.file.buffer,
-          size: req.file.size || req.file.buffer.length
-        }
-      });
-      try {
-        const filePath = path.join(UPLOAD_DIR, fileName);
-        fs.writeFileSync(filePath, req.file.buffer);
-      } catch (cacheErr) {
-        console.warn("Failed to write local disk cache:", cacheErr);
-      }
+      const filePath = path.join(UPLOAD_DIR, fileName);
+      fs.writeFileSync(filePath, req.file.buffer);
       filePublicUrl = `/uploads/proofs/${fileName}`;
     }
     let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
@@ -552,12 +558,22 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
     } else {
       const initialProofUrls = new Array(totalLinks).fill("");
       initialProofUrls[linkIndex] = filePublicUrl;
-      submission = await prisma.submission.create({
-        data: {
+      submission = await prisma.submission.upsert({
+        where: {
+          taskId_studentId: {
+            taskId,
+            studentId
+          }
+        },
+        update: {
+          instagramUrl,
+          // Sesuaikan dengan field link tugas kamu
+          updatedAt: /* @__PURE__ */ new Date()
+        },
+        create: {
           taskId,
           studentId,
-          proofUrls: initialProofUrls,
-          status: "PENDING"
+          instagramUrl
         }
       });
     }
@@ -707,7 +723,7 @@ async function startServer() {
   }
   if (!process.env.VERCEL) {
     app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
+      console.log(`Server running on port ${PORT}`);
     });
   }
 }
