@@ -460,15 +460,20 @@ app.get("/api/student/tasks", authMiddleware, async (req, res) => {
     const now = /* @__PURE__ */ new Date();
     const tasksWithStatus = tasks.map((t) => {
       const submission = submissions.find((s) => s.taskId === t.id);
-      const totalLinks = t.igPostUrls && t.igPostUrls.length > 0 ? t.igPostUrls.length : t.igPostUrl ? 1 : 1;
+      const urls = toStringArray(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : []));
+      const totalLinks = urls.length > 0 ? urls.length : 1;
       const isSubmitted = submission ? submission.status === "SUBMITTED" : false;
       const isClosed = !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false);
       return {
         ...t,
-        platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
+        igPostUrls: urls,
+        platform: t.platform || detectTaskPlatform(urls),
         hasUploaded: isSubmitted,
         isClosed,
-        submission: submission || null
+        submission: submission ? {
+          ...submission,
+          proofUrls: toStringArray(submission.proofUrls)
+        } : null
       };
     });
     res.json(tasksWithStatus);
@@ -488,7 +493,8 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
     if (isClosed) {
       return res.status(403).json({ error: "Tugas ini telah ditutup atau telah melewati batas waktu pengumpulan." });
     }
-    const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : task.igPostUrl ? 1 : 1;
+    const taskUrls = toStringArray(task.igPostUrls || (task.igPostUrl ? [task.igPostUrl] : []));
+    const totalLinks = taskUrls.length > 0 ? taskUrls.length : 1;
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const originalExt = path.extname(req.file.originalname || "").toLowerCase();
     const ext = originalExt && originalExt !== ".heic" && originalExt !== ".heif" ? originalExt : ".jpg";
@@ -499,11 +505,12 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
     const filePublicUrl = `/uploads/proofs/${fileName}`;
     let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
     if (submission) {
-      const oldUrl = submission.proofUrls[linkIndex];
+      const currentProofUrls = toStringArray(submission.proofUrls);
+      const oldUrl = currentProofUrls[linkIndex];
       if (oldUrl && oldUrl !== filePublicUrl) {
         await deleteStoredFile(oldUrl);
       }
-      const newProofUrls = [...submission.proofUrls];
+      const newProofUrls = [...currentProofUrls];
       while (newProofUrls.length < totalLinks) newProofUrls.push("");
       newProofUrls[linkIndex] = filePublicUrl;
       submission = await prisma.submission.update({
@@ -525,8 +532,7 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
         },
         update: {
           proofUrls: initialProofUrls,
-          status: "PENDING",
-          updatedAt: /* @__PURE__ */ new Date()
+          status: "PENDING"
         },
         create: {
           taskId,
@@ -536,7 +542,10 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
         }
       });
     }
-    res.json(submission);
+    res.json({
+      ...submission,
+      proofUrls: toStringArray(submission.proofUrls)
+    });
   } catch (error) {
     console.error("Submission Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -552,12 +561,14 @@ app.post("/api/student/tasks/:taskId/finalize", authMiddleware, async (req, res)
     if (isClosed) {
       return res.status(403).json({ error: "Tugas ini telah ditutup atau telah melewati batas waktu pengumpulan." });
     }
-    const totalLinks = task.igPostUrls && task.igPostUrls.length > 0 ? task.igPostUrls.length : task.igPostUrl ? 1 : 1;
+    const taskUrls = toStringArray(task.igPostUrls || (task.igPostUrl ? [task.igPostUrl] : []));
+    const totalLinks = taskUrls.length > 0 ? taskUrls.length : 1;
     const submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
     if (!submission) {
       return res.status(400).json({ error: "Belum ada bukti foto yang diunggah" });
     }
-    const uploadedCount = submission.proofUrls.filter((url) => !!url).length;
+    const proofUrls = toStringArray(submission.proofUrls);
+    const uploadedCount = proofUrls.filter((url) => !!url).length;
     if (uploadedCount < totalLinks) {
       return res.status(400).json({ error: `Harap lengkapi semua foto bukti (${uploadedCount}/${totalLinks} terunggah)` });
     }
@@ -565,7 +576,7 @@ app.post("/api/student/tasks/:taskId/finalize", authMiddleware, async (req, res)
       where: { id: submission.id },
       data: { status: "SUBMITTED" }
     });
-    res.json({ message: "Tugas berhasil disubmit!", submission: updated });
+    res.json({ message: "Tugas berhasil disubmit!", submission: { ...updated, proofUrls: toStringArray(updated.proofUrls) } });
   } catch (error) {
     console.error("Finalize Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -589,7 +600,7 @@ app.post("/api/student/tasks/:taskId/unsubmit", authMiddleware, async (req, res)
       where: { id: submission.id },
       data: { status: "PENDING" }
     });
-    res.json({ message: "Pengumpulan tugas berhasil dibatalkan. Anda dapat mengganti foto bukti dan mengirimkan kembali.", submission: updated });
+    res.json({ message: "Pengumpulan tugas berhasil dibatalkan. Anda dapat mengganti foto bukti dan mengirimkan kembali.", submission: { ...updated, proofUrls: toStringArray(updated.proofUrls) } });
   } catch (error) {
     console.error("Unsubmit Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -610,7 +621,8 @@ app.post("/api/student/tasks/:taskId/remove-proof", authMiddleware, async (req, 
     if (!submission) {
       return res.status(404).json({ error: "Data pengumpulan tidak ditemukan" });
     }
-    const newProofUrls = [...submission.proofUrls];
+    const currentProofUrls = toStringArray(submission.proofUrls);
+    const newProofUrls = [...currentProofUrls];
     if (newProofUrls[linkIndex]) {
       const oldUrl = newProofUrls[linkIndex];
       newProofUrls[linkIndex] = "";
@@ -623,7 +635,7 @@ app.post("/api/student/tasks/:taskId/remove-proof", authMiddleware, async (req, 
         status: "PENDING"
       }
     });
-    res.json({ message: "Bukti berhasil dihapus", submission: updated });
+    res.json({ message: "Bukti berhasil dihapus", submission: { ...updated, proofUrls: toStringArray(updated.proofUrls) } });
   } catch (error) {
     console.error("Remove Proof Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
