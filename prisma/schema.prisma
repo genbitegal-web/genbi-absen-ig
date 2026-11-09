@@ -23,10 +23,10 @@ model User {
 model Task {
   id          Int          @id @default(autoincrement())
   title       String
-  description String
+  description String       @db.Text
   platform    String       @default("INSTAGRAM")
   igPostUrl   String?
-  igPostUrls   Json?
+  igPostUrls  Json?
   deadline    DateTime?
   isOpen      Boolean      @default(true)
   createdAt   DateTime     @default(now())
@@ -37,7 +37,7 @@ model Submission {
   id        Int      @id @default(autoincrement())
   taskId    Int
   studentId Int
-  proofUrls    Json?
+  proofUrls Json?
   status    String   @default("PENDING")
   createdAt DateTime @default(now())
   student   User     @relation(fields: [studentId], references: [id])
@@ -49,7 +49,7 @@ model Submission {
 model Notification {
   id        Int      @id @default(autoincrement())
   userId    Int
-  message   String
+  message   String   @db.Text
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])

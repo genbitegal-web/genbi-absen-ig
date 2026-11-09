@@ -10,10 +10,8 @@ import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
 
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
-}
-if (!process.env.DIRECT_URL) {
-  process.env.DIRECT_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  console.error('❌ DATABASE_URL tidak di-set! Pastikan file .env sudah ada dan berisi DATABASE_URL.');
+  process.exit(1);
 }
 
 const app = express();
@@ -69,11 +67,13 @@ async function deleteStoredFile(urlOrFileName: string | null) {
 }
 
 // Helper to detect task platform (YouTube, Instagram, or Mixed)
-function detectTaskPlatform(urls: string[] = [], explicitPlatform?: string): 'INSTAGRAM' | 'YOUTUBE' | 'MIXED' {
+function detectTaskPlatform(urls: any = [], explicitPlatform?: string): 'INSTAGRAM' | 'YOUTUBE' | 'MIXED' {
   if (explicitPlatform === 'YOUTUBE' || explicitPlatform === 'INSTAGRAM' || explicitPlatform === 'MIXED') {
     return explicitPlatform;
   }
-  const validUrls = (urls || []).filter(u => u && typeof u === 'string' && u.trim().length > 0);
+  // Normalize: JSON field dari MySQL bisa jadi string JSON atau array
+  const arr = toStringArray(urls);
+  const validUrls = arr.filter(u => u && typeof u === 'string' && u.trim().length > 0);
   if (validUrls.length === 0) return 'INSTAGRAM';
   const ytCount = validUrls.filter(u => u.toLowerCase().includes('youtube.com') || u.toLowerCase().includes('youtu.be')).length;
   const igCount = validUrls.filter(u => u.toLowerCase().includes('instagram.com')).length;
@@ -81,6 +81,19 @@ function detectTaskPlatform(urls: string[] = [], explicitPlatform?: string): 'IN
   if (igCount > 0 && ytCount === 0) return 'INSTAGRAM';
   if (ytCount > 0 && igCount > 0) return 'MIXED';
   return 'INSTAGRAM';
+}
+
+// Helper: konversi Json? dari MySQL ke string[] yang aman
+function toStringArray(val: any): string[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(v => typeof v === 'string');
+  if (typeof val === 'string') {
+    try { 
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed.filter((v: any) => typeof v === 'string') : [];
+    } catch { return []; }
+  }
+  return [];
 }
 
 // Setup Multer for memory uploads with generous size limits
@@ -350,7 +363,10 @@ app.get('/api/admin/students', authMiddleware, adminMiddleware, async (req, res)
 app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) => {
   const { title, description, igPostUrls, igPostUrl, deadline, isOpen, platform } = req.body;
   try {
-    const allUrls = igPostUrls || (igPostUrl ? [igPostUrl] : []);
+    if (!title || !description) {
+      return res.status(400).json({ error: 'Judul dan deskripsi tugas wajib diisi' });
+    }
+    const allUrls: string[] = igPostUrls || (igPostUrl ? [igPostUrl] : []);
     const resolvedPlatform = detectTaskPlatform(allUrls, platform);
 
     const task = await prisma.task.create({
@@ -359,7 +375,7 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
         description, 
         platform: resolvedPlatform,
         igPostUrl: igPostUrl || null,
-        igPostUrls: allUrls,
+        igPostUrls: allUrls as any,   // MySQL Json? field
         deadline: deadline ? new Date(deadline) : null,
         isOpen: isOpen !== undefined ? Boolean(isOpen) : true
       }
@@ -387,7 +403,7 @@ app.post('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =
       console.warn("Warning: Gagal mengirim notifikasi massal:", notifErr);
     }
 
-    res.json(task);
+    res.json({ ...task, igPostUrls: toStringArray(task.igPostUrls) });
   } catch (error: any) {
     console.error("Admin Task Create Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
@@ -451,7 +467,8 @@ app.get('/api/admin/tasks', authMiddleware, adminMiddleware, async (req, res) =>
     const now = new Date();
     const tasksWithClosedStatus = tasks.map(t => ({
       ...t,
-      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
+      igPostUrls: toStringArray(t.igPostUrls),
+      platform: t.platform || detectTaskPlatform(toStringArray(t.igPostUrls) || (t.igPostUrl ? [t.igPostUrl] : [])),
       isClosed: !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false)
     }));
 

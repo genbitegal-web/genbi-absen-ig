@@ -11,10 +11,8 @@ import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
 import { v2 as cloudinary } from "cloudinary";
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
-}
-if (!process.env.DIRECT_URL) {
-  process.env.DIRECT_URL = "postgresql://neondb_owner:npg_QrqhLxaCd7X6@ep-patient-wildflower-b5xmms42.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require";
+  console.error('❌ DATABASE_URL tidak di-set! Pastikan file .env sudah ada dan berisi DATABASE_URL.');
+  process.exit(1);
 }
 if (process.env.CLOUDINARY_URL) {
   cloudinary.config({
