@@ -9,52 +9,9 @@ import os from "os";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
-import { v2 as cloudinary } from "cloudinary";
 if (!process.env.DATABASE_URL) {
-  console.error('❌ DATABASE_URL tidak di-set! Pastikan file .env sudah ada dan berisi DATABASE_URL.');
+  console.error("\u274C DATABASE_URL tidak di-set! Pastikan file .env sudah ada dan berisi DATABASE_URL.");
   process.exit(1);
-}
-if (process.env.CLOUDINARY_URL) {
-  cloudinary.config({
-    cloudinary_url: process.env.CLOUDINARY_URL
-  });
-} else if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-    secure: true
-  });
-}
-function isCloudinaryConfigured() {
-  return Boolean(
-    process.env.CLOUDINARY_URL || process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET
-  );
-}
-function getCloudinaryPublicId(url) {
-  if (!url || !url.includes("cloudinary.com")) return null;
-  const match = url.match(/\/upload\/(?:v\d+\/)?([^\.]+)/);
-  return match ? match[1] : null;
-}
-async function uploadToCloudinary(buffer) {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: "genbi_proofs",
-        resource_type: "auto"
-      },
-      (error, result) => {
-        if (error) {
-          return reject(error);
-        }
-        if (!result?.secure_url) {
-          return reject(new Error("Upload Cloudinary tidak menghasilkan secure_url"));
-        }
-        resolve(result.secure_url);
-      }
-    );
-    uploadStream.end(buffer);
-  });
 }
 var app = express();
 var PORT = process.env.PORT || 3005;
@@ -76,16 +33,6 @@ try {
 }
 async function deleteStoredFile(urlOrFileName) {
   if (!urlOrFileName) return;
-  if (urlOrFileName.includes("cloudinary.com")) {
-    const publicId = getCloudinaryPublicId(urlOrFileName);
-    if (publicId) {
-      try {
-        await cloudinary.uploader.destroy(publicId);
-      } catch (e) {
-        console.warn("Gagal menghapus file dari Cloudinary:", publicId, e);
-      }
-    }
-  }
   const fileName = urlOrFileName.includes("/") ? urlOrFileName.split("/").pop() : urlOrFileName;
   if (!fileName) return;
   try {
@@ -108,7 +55,8 @@ function detectTaskPlatform(urls = [], explicitPlatform) {
   if (explicitPlatform === "YOUTUBE" || explicitPlatform === "INSTAGRAM" || explicitPlatform === "MIXED") {
     return explicitPlatform;
   }
-  const validUrls = (urls || []).filter((u) => u && typeof u === "string" && u.trim().length > 0);
+  const arr = toStringArray(urls);
+  const validUrls = arr.filter((u) => u && typeof u === "string" && u.trim().length > 0);
   if (validUrls.length === 0) return "INSTAGRAM";
   const ytCount = validUrls.filter((u) => u.toLowerCase().includes("youtube.com") || u.toLowerCase().includes("youtu.be")).length;
   const igCount = validUrls.filter((u) => u.toLowerCase().includes("instagram.com")).length;
@@ -116,6 +64,19 @@ function detectTaskPlatform(urls = [], explicitPlatform) {
   if (igCount > 0 && ytCount === 0) return "INSTAGRAM";
   if (ytCount > 0 && igCount > 0) return "MIXED";
   return "INSTAGRAM";
+}
+function toStringArray(val) {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter((v) => typeof v === "string");
+  if (typeof val === "string") {
+    try {
+      const parsed = JSON.parse(val);
+      return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 var storage = multer.memoryStorage();
 var upload = multer({
@@ -343,6 +304,9 @@ app.get("/api/admin/students", authMiddleware, adminMiddleware, async (req, res)
 app.post("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) => {
   const { title, description, igPostUrls, igPostUrl, deadline, isOpen, platform } = req.body;
   try {
+    if (!title || !description) {
+      return res.status(400).json({ error: "Judul dan deskripsi tugas wajib diisi" });
+    }
     const allUrls = igPostUrls || (igPostUrl ? [igPostUrl] : []);
     const resolvedPlatform = detectTaskPlatform(allUrls, platform);
     const task = await prisma.task.create({
@@ -352,23 +316,29 @@ app.post("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) =
         platform: resolvedPlatform,
         igPostUrl: igPostUrl || null,
         igPostUrls: allUrls,
+        // MySQL Json? field
         deadline: deadline ? new Date(deadline) : null,
         isOpen: isOpen !== void 0 ? Boolean(isOpen) : true
       }
     });
-    const students = await prisma.user.findMany({ where: { role: "STUDENT" } });
-    if (students.length > 0) {
-      const deadlineText = task.deadline ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })})` : "";
-      const actionText = resolvedPlatform === "YOUTUBE" ? "Tonton video, berikan like & komentar!" : resolvedPlatform === "MIXED" ? "Selesaikan tugas dan unggah bukti!" : "Segera berikan like, komen, dan repost!";
-      const tagText = resolvedPlatform === "YOUTUBE" ? " (YouTube)" : resolvedPlatform === "MIXED" ? " (YouTube & IG)" : "";
-      const notifications = students.map((s) => ({
-        userId: s.id,
-        message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`
-      }));
-      await prisma.notification.createMany({ data: notifications });
+    try {
+      const students = await prisma.user.findMany({ where: { role: "STUDENT" } });
+      if (students.length > 0) {
+        const deadlineText = task.deadline ? ` (Batas waktu: ${new Date(task.deadline).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" })})` : "";
+        const actionText = resolvedPlatform === "YOUTUBE" ? "Tonton video, berikan like & komentar!" : resolvedPlatform === "MIXED" ? "Selesaikan tugas dan unggah bukti!" : "Segera berikan like, komen, dan repost!";
+        const tagText = resolvedPlatform === "YOUTUBE" ? " (YouTube)" : resolvedPlatform === "MIXED" ? " (YouTube & IG)" : "";
+        const notifications = students.map((s) => ({
+          userId: s.id,
+          message: `Tugas Baru${tagText}: ${title}${deadlineText}. ${actionText}`
+        }));
+        await prisma.notification.createMany({ data: notifications });
+      }
+    } catch (notifErr) {
+      console.warn("Warning: Gagal mengirim notifikasi massal:", notifErr);
     }
-    res.json(task);
+    res.json({ ...task, igPostUrls: toStringArray(task.igPostUrls) });
   } catch (error) {
+    console.error("Admin Task Create Error:", error);
     res.status(500).json({ error: error.message || "Unknown error" });
   }
 });
@@ -424,7 +394,8 @@ app.get("/api/admin/tasks", authMiddleware, adminMiddleware, async (req, res) =>
     const now = /* @__PURE__ */ new Date();
     const tasksWithClosedStatus = tasks.map((t) => ({
       ...t,
-      platform: t.platform || detectTaskPlatform(t.igPostUrls || (t.igPostUrl ? [t.igPostUrl] : [])),
+      igPostUrls: toStringArray(t.igPostUrls),
+      platform: t.platform || detectTaskPlatform(toStringArray(t.igPostUrls) || (t.igPostUrl ? [t.igPostUrl] : [])),
       isClosed: !t.isOpen || (t.deadline ? now > new Date(t.deadline) : false)
     }));
     res.json(tasksWithClosedStatus);
@@ -523,20 +494,9 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
     const ext = originalExt && originalExt !== ".heic" && originalExt !== ".heif" ? originalExt : ".jpg";
     const baseClean = req.file.originalname ? path.basename(req.file.originalname, originalExt).replace(/[^a-zA-Z0-9]/g, "") : "proof";
     const fileName = `${uniqueSuffix}-${baseClean || "proof"}${ext}`;
-    const contentType = req.file.mimetype && req.file.mimetype !== "application/octet-stream" ? req.file.mimetype : "image/jpeg";
-    let filePublicUrl = "";
-    if (isCloudinaryConfigured()) {
-      try {
-        filePublicUrl = await uploadToCloudinary(req.file.buffer);
-      } catch (cloudErr) {
-        console.warn("Cloudinary upload failed, falling back to Neon database storage:", cloudErr?.message);
-      }
-    }
-    if (!filePublicUrl) {
-      const filePath = path.join(UPLOAD_DIR, fileName);
-      fs.writeFileSync(filePath, req.file.buffer);
-      filePublicUrl = `/uploads/proofs/${fileName}`;
-    }
+    const filePath = path.join(UPLOAD_DIR, fileName);
+    fs.writeFileSync(filePath, req.file.buffer);
+    const filePublicUrl = `/uploads/proofs/${fileName}`;
     let submission = await prisma.submission.findUnique({ where: { taskId_studentId: { taskId, studentId } } });
     if (submission) {
       const oldUrl = submission.proofUrls[linkIndex];
@@ -564,14 +524,15 @@ app.post("/api/student/tasks/:taskId/submit", authMiddleware, upload.single("pro
           }
         },
         update: {
-          instagramUrl,
-          // Sesuaikan dengan field link tugas kamu
+          proofUrls: initialProofUrls,
+          status: "PENDING",
           updatedAt: /* @__PURE__ */ new Date()
         },
         create: {
           taskId,
           studentId,
-          instagramUrl
+          proofUrls: initialProofUrls,
+          status: "PENDING"
         }
       });
     }
